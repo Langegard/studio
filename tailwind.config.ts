@@ -8,7 +8,11 @@ export default {
     "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
-  	extend: {
+    extend: {
+      fontFamily: {
+        sans: ["var(--font-geist-sans)"],
+        mono: ["var(--font-geist-mono)"],
+      },
   		colors: {
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
@@ -50,6 +54,12 @@ export default {
   				'4': 'hsl(var(--chart-4))',
   				'5': 'hsl(var(--chart-5))'
   			},
+        'agenda-color-1': 'hsl(var(--agenda-color-1))',
+        'agenda-color-2': 'hsl(var(--agenda-color-2))',
+        'agenda-color-3': 'hsl(var(--agenda-color-3))',
+        'agenda-color-4': 'hsl(var(--agenda-color-4))',
+        'agenda-color-5': 'hsl(var(--agenda-color-5))',
+        'agenda-color-6': 'hsl(var(--agenda-color-6))',
   			sidebar: {
   				DEFAULT: 'hsl(var(--sidebar-background))',
   				foreground: 'hsl(var(--sidebar-foreground))',
@@ -82,11 +92,17 @@ export default {
   				to: {
   					height: '0'
   				}
-  			}
+  			},
+        'progress-indeterminate': { // Added for custom progress animation
+          '0%': { transform: 'translateX(-100%) scaleX(0.5)' },
+          '50%': { transform: 'translateX(0) scaleX(0.3)' },
+          '100%': { transform: 'translateX(100%) scaleX(0.5)' },
+        }
   		},
   		animation: {
   			'accordion-down': 'accordion-down 0.2s ease-out',
-  			'accordion-up': 'accordion-up 0.2s ease-out'
+  			'accordion-up': 'accordion-up 0.2s ease-out',
+        'progress-indeterminate': 'progress-indeterminate 1.5s infinite ease-in-out', // Added for custom progress animation
   		}
   	}
   },
