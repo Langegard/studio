@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter, CardDescription } from "@/components/ui/card";
-import { PlusCircle, Trash2, Play, GripVertical, Save, List, FileUp, FileDown } from "lucide-react";
+import { PlusCircle, Trash2, Play, GripVertical, Save } from "lucide-react"; // Removed FileUp, FileDown as they are not used
 import { ScrollArea } from "@/components/ui/scroll-area";
 import React, { useState, useEffect, useCallback } from "react";
 import {
@@ -49,7 +49,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Label } from "@/components/ui/label"; // Added import for basic Label
+import { Label } from "@/components/ui/label";
 
 const agendaItemSchema = z.object({
   id: z.string().uuid("Item ID must be a valid UUID."),
@@ -87,9 +87,14 @@ export default function AgendaForm() {
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [newPresetName, setNewPresetName] = useState("");
   const [selectedPresetToLoad, setSelectedPresetToLoad] = useState<string>("");
+  const [clientMounted, setClientMounted] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.localStorage) {
+    setClientMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (clientMounted && typeof window !== 'undefined' && window.localStorage) {
       const storedPresets = localStorage.getItem(LOCAL_STORAGE_PRESETS_KEY);
       if (storedPresets) {
         try {
@@ -104,7 +109,7 @@ export default function AgendaForm() {
         }
       }
     }
-  }, [toast]);
+  }, [clientMounted, toast]);
 
   const savePresetsToStorage = useCallback((updatedPresets: Preset[]) => {
     if (typeof window !== 'undefined' && window.localStorage) {
@@ -147,11 +152,9 @@ export default function AgendaForm() {
     if (!presetName) return;
     const presetToLoad = presets.find(p => p.name === presetName);
     if (presetToLoad) {
-      // Ensure all loaded items have valid UUIDs, react-hook-form's useFieldArray needs stable unique IDs for its internal `fields`
-      // Our schema enforces UUID, so this should be fine.
       const validatedAgendaItems = presetToLoad.agenda.map(item => ({
         ...item,
-        id: item.id || crypto.randomUUID(), // Fallback if an old preset somehow misses an ID
+        id: item.id || crypto.randomUUID(),
       }));
       form.reset({ agendaItems: validatedAgendaItems });
       toast({ title: "Preset Loaded", description: `Agenda for "${presetName}" has been loaded.` });
@@ -188,7 +191,7 @@ export default function AgendaForm() {
   };
   
   const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault(); // Necessary to allow dropping
+    event.preventDefault(); 
     if (draggedItemIndex !== null) {
       event.dataTransfer.dropEffect = 'move';
     }
@@ -229,15 +232,17 @@ export default function AgendaForm() {
 
         <CardContent className="space-y-4 border-b pb-6">
           <h3 className="text-lg font-medium">Agenda Presets</h3>
-          {typeof window !== 'undefined' && window.localStorage ? (
+          {!clientMounted ? (
+            <p className="text-sm text-muted-foreground">Loading preset options...</p>
+          ) : (typeof window !== 'undefined' && window.localStorage) ? (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_auto] items-end">
-              <div className="flex flex-col"> {/* Replaced FormItem with div */}
-                <Label htmlFor="load-preset-select" className="mb-1.5 text-sm font-medium">Load Preset</Label> {/* Used Label from ui/label */}
+              <div className="flex flex-col">
+                <Label htmlFor="load-preset-select" className="mb-1.5 text-sm font-medium">Load Preset</Label>
                  <Select 
                     onValueChange={(value) => { setSelectedPresetToLoad(value); handleLoadPreset(value); }} 
                     value={selectedPresetToLoad}
                   >
-                  <SelectTrigger id="load-preset-select" disabled={presets.length === 0}> {/* Removed FormControl wrapper */}
+                  <SelectTrigger id="load-preset-select" disabled={presets.length === 0}>
                     <SelectValue placeholder="Select a preset to load" />
                   </SelectTrigger>
                   <SelectContent>
@@ -300,7 +305,7 @@ export default function AgendaForm() {
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)}>
             <CardContent className="space-y-6 pt-6">
-               <ScrollArea className="h-[calc(100vh-38rem)] min-h-[10rem] pr-3"> {/* Adjusted height */}
+               <ScrollArea className="h-[calc(100vh-38rem)] min-h-[10rem] pr-3">
                 <div className="space-y-4">
                 {fields.map((field, index) => (
                   <Card 
@@ -321,11 +326,11 @@ export default function AgendaForm() {
                       <FormField
                         control={form.control}
                         name={`agendaItems.${index}.headline`}
-                        render={({ field }) => (
+                        render={({ field: controllerField }) => (
                           <FormItem className="w-full">
                             <FormLabel>Headline {index + 1}</FormLabel>
                             <FormControl>
-                              <Input placeholder="e.g., Patient History" {...field} />
+                              <Input placeholder="e.g., Patient History" {...controllerField} />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -334,11 +339,11 @@ export default function AgendaForm() {
                       <FormField
                         control={form.control}
                         name={`agendaItems.${index}.time`}
-                        render={({ field }) => (
+                        render={({ field: controllerField }) => (
                           <FormItem>
                             <FormLabel>Time (min)</FormLabel>
                             <FormControl>
-                              <Input type="number" placeholder="e.g., 15" {...field} />
+                              <Input type="number" placeholder="e.g., 15" {...controllerField} />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
