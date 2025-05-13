@@ -3,3 +3,8 @@ export interface AgendaItem {
   headline: string;
   time: number; // in minutes
 }
+
+export interface Preset {
+  name: string;
+  agenda: AgendaItem[];
+}

@@ -24,6 +24,33 @@ interface MeetingTimelineProps {
 
 const TIME_RESOLUTION_MS = 100; // Update timer every 100ms for smoother animation
 
+// Helper to determine text color based on background luminance
+function getLuminance(hslColor: string): number {
+  // Extract H, S, L values from hsl(H, S%, L%) string
+  const match = hslColor.match(/hsl\((\d+)\s*,\s*(\d+)%\s*,\s*(\d+)%\)/i) ?? 
+                hslColor.match(/hsl\((\d+)\s+(\d+)%\s+(\d+)%\)/i);
+
+  if (!match) {
+    // Attempt to parse CSS variable like hsl(var(--some-var)) by looking up the variable
+    const varMatch = hslColor.match(/hsl\(var\((--[^)]+)\)\)/i);
+    if (varMatch && typeof window !== 'undefined') {
+        const varName = varMatch[1];
+        const computedColor = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+        // Recursively call getLuminance with the resolved color, guarding against infinite loops
+        if (computedColor && computedColor !== hslColor) return getLuminance(computedColor);
+    }
+    return 0.5; // Default to mid luminance if parse fails or var lookup fails
+  }
+
+
+  let l = parseInt(match[3]) / 100; // L value from 0 to 1
+
+  // Formula for perceived luminance (simplified for L in HSL)
+  // This is a rough approximation. A more accurate one would convert HSL to RGB first.
+  return l;
+}
+
+
 export default function MeetingTimeline({ agendaItems }: MeetingTimelineProps) {
   const router = useRouter();
   const [totalElapsedTimeMs, setTotalElapsedTimeMs] = useState(0);
@@ -31,12 +58,25 @@ export default function MeetingTimeline({ agendaItems }: MeetingTimelineProps) {
   const [aiAlert, setAiAlert] = useState<TimeManagementAssistantOutput | null>(null);
   const [showAiAlertDialog, setShowAiAlertDialog] = useState(false);
   const [lastAiCheckTime, setLastAiCheckTime] = useState<Record<number, number>>({}); // Tracks last AI check per item elapsed time
+  const [resolvedTextColors, setResolvedTextColors] = useState<string[]>([]);
+
 
   const totalMeetingDurationMinutes = useMemo(
     () => agendaItems.reduce((sum, item) => sum + item.time, 0),
     [agendaItems]
   );
   const totalMeetingDurationMs = totalMeetingDurationMinutes * 60 * 1000;
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const colors = agendaItems.map((_, index) => {
+        const itemBgColor = getAgendaItemColor(index);
+        return getLuminance(itemBgColor) > 0.5 ? 'hsl(var(--foreground))' : 'hsl(var(--background))';
+      });
+      setResolvedTextColors(colors);
+    }
+  }, [agendaItems]);
+
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -63,7 +103,7 @@ export default function MeetingTimeline({ agendaItems }: MeetingTimelineProps) {
       cumulativeTime += itemDurationMs;
     }
     // Should not be reached if agendaItems is not empty
-    setCurrentAgendaItemIndex(agendaItems.length -1);
+    setCurrentAgendaItemIndex(agendaItems.length > 0 ? agendaItems.length -1 : 0);
     return { 
       currentItemElapsedTimeMs: agendaItems.length > 0 ? Math.max(0, totalElapsedTimeMs - cumulativeTime + (agendaItems[agendaItems.length-1].time * 60 * 1000)) : 0,
       cumulativeTimeUpToCurrentItemMs: cumulativeTime - (agendaItems.length > 0 ? (agendaItems[agendaItems.length-1].time * 60 * 1000) : 0)
@@ -158,6 +198,7 @@ export default function MeetingTimeline({ agendaItems }: MeetingTimelineProps) {
               const itemEndTimeMs = itemStartTimeMs + itemDurationMs;
               const isPassed = totalElapsedTimeMs >= itemEndTimeMs;
               const isActive = currentAgendaItemIndex === index;
+              const textColor = resolvedTextColors[index] || 'hsl(var(--foreground))'; // Default if not resolved
 
               return (
                 <div
@@ -171,16 +212,17 @@ export default function MeetingTimeline({ agendaItems }: MeetingTimelineProps) {
                   title={`${item.headline} (${item.time} min)`}
                 >
                   <span 
-                    className={`text-xs sm:text-sm font-medium truncate text-center ${isPassed ? 'text-muted-foreground/70' : 'text-primary-foreground'}`}
+                    className={`text-xs sm:text-sm font-medium truncate text-center`}
                     style={{
-                      color: isPassed ? 'hsl(var(--muted-foreground))' : (getLuminance(getAgendaItemColor(index)) > 0.5 ? 'hsl(var(--foreground))' : 'hsl(var(--background))')
+                      color: isPassed ? 'hsl(var(--muted-foreground))' : textColor
                     }}
                   >
                     {item.headline}
                   </span>
-                   <span className={`text-[0.6rem] sm:text-xs ${isPassed ? 'text-muted-foreground/60' : 'text-primary-foreground/80'}`}
+                   <span className={`text-[0.6rem] sm:text-xs`}
                      style={{
-                      color: isPassed ? 'hsl(var(--muted-foreground))' : (getLuminance(getAgendaItemColor(index)) > 0.5 ? 'hsl(var(--foreground))' : 'hsl(var(--background))')
+                      color: isPassed ? 'hsl(var(--muted-foreground))' : textColor,
+                      opacity: isPassed? 0.6 : 0.8,
                     }}
                    >
                     {item.time} min
@@ -240,17 +282,3 @@ export default function MeetingTimeline({ agendaItems }: MeetingTimelineProps) {
     </div>
   );
 }
-
-// Helper to determine text color based on background luminance
-function getLuminance(hslColor: string): number {
-  // Extract H, S, L values from hsl(H, S%, L%) string
-  const match = hslColor.match(/hsl\((\d+)\s*(\d+)%\s*(\d+)%\)/);
-  if (!match) return 0.5; // Default to mid luminance if parse fails
-
-  let l = parseInt(match[3]) / 100; // L value from 0 to 1
-
-  // Formula for perceived luminance (simplified for L in HSL)
-  // This is a rough approximation. A more accurate one would convert HSL to RGB first.
-  return l;
-}
-
