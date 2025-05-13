@@ -1,4 +1,3 @@
-
 "use client";
 
 import type { AgendaItem, Preset } from "@/lib/types";
@@ -17,7 +16,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter, CardDescription } from "@/components/ui/card";
-import { PlusCircle, Trash2, Play, GripVertical, Save } from "lucide-react"; // Removed FileUp, FileDown as they are not used
+import { PlusCircle, Trash2, Play, GripVertical, Save } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import React, { useState, useEffect, useCallback } from "react";
 import {
@@ -71,7 +70,8 @@ export default function AgendaForm() {
   const form = useForm<AgendaFormValues>({
     resolver: zodResolver(agendaFormSchema),
     defaultValues: {
-      agendaItems: [{ id: crypto.randomUUID(), headline: "", time: 10 }],
+      // Initialize with empty array to prevent crypto.randomUUID() on server/client mismatch for initial render
+      agendaItems: [],
     },
   });
 
@@ -93,6 +93,15 @@ export default function AgendaForm() {
     setClientMounted(true);
   }, []);
 
+  // Effect to add initial default item once client is mounted and if no items exist
+  useEffect(() => {
+    if (clientMounted && form.getValues().agendaItems.length === 0) {
+      // crypto.randomUUID() is safe here as it's client-side only after mount
+      append({ id: crypto.randomUUID(), headline: "", time: 10 });
+    }
+  }, [clientMounted, append, form]);
+
+
   useEffect(() => {
     if (clientMounted && typeof window !== 'undefined' && window.localStorage) {
       const storedPresets = localStorage.getItem(LOCAL_STORAGE_PRESETS_KEY);
@@ -100,7 +109,8 @@ export default function AgendaForm() {
         try {
           const parsedPresets = JSON.parse(storedPresets) as Preset[];
           setPresets(parsedPresets);
-          if (parsedPresets.length > 0) {
+          if (parsedPresets.length > 0 && !selectedPresetToLoad) {
+             // Initialize selectedPresetToLoad if not already set (e.g. from a save operation)
             setSelectedPresetToLoad(parsedPresets[0].name);
           }
         } catch (e) {
@@ -109,7 +119,7 @@ export default function AgendaForm() {
         }
       }
     }
-  }, [clientMounted, toast]);
+  }, [clientMounted, toast, selectedPresetToLoad]); // selectedPresetToLoad added to prevent resetting it if already set
 
   const savePresetsToStorage = useCallback((updatedPresets: Preset[]) => {
     if (typeof window !== 'undefined' && window.localStorage) {
@@ -143,7 +153,7 @@ export default function AgendaForm() {
     
     setPresets(updatedPresets);
     savePresetsToStorage(updatedPresets);
-    setSelectedPresetToLoad(newPresetName); // Select the newly saved/updated preset
+    setSelectedPresetToLoad(newPresetName); 
     setShowSaveDialog(false);
     setNewPresetName("");
   };
@@ -154,7 +164,7 @@ export default function AgendaForm() {
     if (presetToLoad) {
       const validatedAgendaItems = presetToLoad.agenda.map(item => ({
         ...item,
-        id: item.id || crypto.randomUUID(),
+        id: item.id || crypto.randomUUID(), // Ensure items have IDs, generate if missing
       }));
       form.reset({ agendaItems: validatedAgendaItems });
       toast({ title: "Preset Loaded", description: `Agenda for "${presetName}" has been loaded.` });
@@ -174,6 +184,12 @@ export default function AgendaForm() {
     toast({ title: "Preset Deleted", description: `Preset "${presetName}" has been deleted.` });
     if (selectedPresetToLoad === presetName) {
       setSelectedPresetToLoad(updatedPresets.length > 0 ? updatedPresets[0].name : "");
+      if (updatedPresets.length === 0 && form.getValues().agendaItems.length > 0) {
+        // If all presets are deleted and form has items, clear form or add default
+        form.reset({ agendaItems: [{ id: crypto.randomUUID(), headline: "", time: 10 }] });
+      } else if (updatedPresets.length === 0) {
+        append({ id: crypto.randomUUID(), headline: "", time: 10 });
+      }
     }
   };
 
@@ -241,8 +257,9 @@ export default function AgendaForm() {
                  <Select 
                     onValueChange={(value) => { setSelectedPresetToLoad(value); handleLoadPreset(value); }} 
                     value={selectedPresetToLoad}
+                    disabled={presets.length === 0}
                   >
-                  <SelectTrigger id="load-preset-select" disabled={presets.length === 0}>
+                  <SelectTrigger id="load-preset-select" >
                     <SelectValue placeholder="Select a preset to load" />
                   </SelectTrigger>
                   <SelectContent>
@@ -281,7 +298,7 @@ export default function AgendaForm() {
                   <DialogHeader>
                     <DialogTitle>Save Agenda Preset</DialogTitle>
                     <DialogDescription>
-                      Enter a name for your current agenda configuration.
+                      Enter a name for your current agenda configuration. If the name exists, it will be overwritten.
                     </DialogDescription>
                   </DialogHeader>
                   <Input 
@@ -376,7 +393,7 @@ export default function AgendaForm() {
               </Button>
             </CardContent>
             <CardFooter>
-              <Button type="submit" className="w-full text-lg py-6" disabled={!form.formState.isValid || form.formState.isSubmitting}>
+              <Button type="submit" className="w-full text-lg py-6" disabled={!form.formState.isValid || fields.length === 0 || form.formState.isSubmitting}>
                 <Play className="mr-2" /> Start Meeting
               </Button>
             </CardFooter>
