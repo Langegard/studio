@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { AgendaItem, Preset } from "@/lib/types";
@@ -48,6 +49,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { Label } from "@/components/ui/label"; // Added import for basic Label
 
 const agendaItemSchema = z.object({
   id: z.string().uuid("Item ID must be a valid UUID."),
@@ -229,21 +231,22 @@ export default function AgendaForm() {
           <h3 className="text-lg font-medium">Agenda Presets</h3>
           {typeof window !== 'undefined' && window.localStorage ? (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_auto] items-end">
-              <FormItem>
-                <FormLabel>Load Preset</FormLabel>
-                 <Select onValueChange={(value) => { setSelectedPresetToLoad(value); handleLoadPreset(value); }} value={selectedPresetToLoad}>
-                  <FormControl>
-                    <SelectTrigger disabled={presets.length === 0}>
-                      <SelectValue placeholder="Select a preset to load" />
-                    </SelectTrigger>
-                  </FormControl>
+              <div className="flex flex-col"> {/* Replaced FormItem with div */}
+                <Label htmlFor="load-preset-select" className="mb-1.5 text-sm font-medium">Load Preset</Label> {/* Used Label from ui/label */}
+                 <Select 
+                    onValueChange={(value) => { setSelectedPresetToLoad(value); handleLoadPreset(value); }} 
+                    value={selectedPresetToLoad}
+                  >
+                  <SelectTrigger id="load-preset-select" disabled={presets.length === 0}> {/* Removed FormControl wrapper */}
+                    <SelectValue placeholder="Select a preset to load" />
+                  </SelectTrigger>
                   <SelectContent>
                     {presets.map(preset => (
                       <SelectItem key={preset.name} value={preset.name}>{preset.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-              </FormItem>
+              </div>
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button variant="outline" className="w-full sm:w-auto" disabled={!selectedPresetToLoad || presets.length === 0}>
