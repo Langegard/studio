@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { AgendaItem } from "@/lib/types";
@@ -25,31 +26,43 @@ interface MeetingTimelineProps {
 const TIME_RESOLUTION_MS = 100; // Update timer every 100ms for smoother animation
 
 // Helper to determine text color based on background luminance
-function getLuminance(hslColor: string): number {
-  // Extract H, S, L values from hsl(H, S%, L%) string
-  const match = hslColor.match(/hsl\((\d+)\s*,\s*(\d+)%\s*,\s*(\d+)%\)/i) ?? 
-                hslColor.match(/hsl\((\d+)\s+(\d+)%\s+(\d+)%\)/i);
-
-  if (!match) {
-    // Attempt to parse CSS variable like hsl(var(--some-var)) by looking up the variable
-    const varMatch = hslColor.match(/hsl\(var\((--[^)]+)\)\)/i);
-    if (varMatch && typeof window !== 'undefined') {
-        const varName = varMatch[1];
-        const computedColor = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
-        // Recursively call getLuminance with the resolved color, guarding against infinite loops
-        if (computedColor && computedColor !== hslColor) return getLuminance(computedColor);
-    }
-    return 0.5; // Default to mid luminance if parse fails or var lookup fails
+function getLuminance(colorString: string): number {
+  // Attempt to parse HSL values like "H S% L%" (common from getComputedStyle for HSL vars)
+  // or "H, S%, L%". This regex handles optional commas and variable spacing.
+  const directHslMatch = colorString.match(/^\s*(\d{1,3})\s*[, ]?\s*(\d{1,3})%\s*[, ]?\s*(\d{1,3})%\s*$/i);
+  if (directHslMatch) {
+    const l = parseInt(directHslMatch[3], 10) / 100;
+    return l; // L value from 0 to 1
   }
 
+  // Attempt to parse standard CSS HSL format: hsl(H, S%, L%) or hsl(H S% L%)
+  const cssHslMatch = colorString.match(/hsl\(?\s*(\d{1,3})\s*[, ]?\s*(\d{1,3})%\s*[, ]?\s*(\d{1,3})%\s*\)?/i);
+  if (cssHslMatch) {
+    const l = parseInt(cssHslMatch[3], 10) / 100;
+    return l; // L value from 0 to 1
+  }
 
-  let l = parseInt(match[3]) / 100; // L value from 0 to 1
-
-  // Formula for perceived luminance (simplified for L in HSL)
-  // This is a rough approximation. A more accurate one would convert HSL to RGB first.
-  return l;
+  // If it's a CSS variable string like 'hsl(var(--some-color))', resolve it
+  const varMatch = colorString.match(/hsl\(var\((--[^)]+)\)\)/i);
+  if (varMatch && typeof window !== 'undefined') {
+    const varName = varMatch[1];
+    // Ensure documentElement is available (client-side check)
+    if (document?.documentElement) {
+      const computedColorValue = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+      // Recursively call with the resolved value (which should be "H S% L%" or similar)
+      // Guard against infinite loops if resolution fails or var is not HSL
+      if (computedColorValue && computedColorValue !== colorString) {
+        return getLuminance(computedColorValue);
+      }
+    }
+  }
+  // Fallback for unparsable colors or if not client-side for var resolution
+  // console.warn(`Could not parse color string for luminance: "${colorString}"`);
+  return 0.5; // Default to mid luminance
 }
 
+const LIGHT_TEXT_COLOR = 'hsl(0, 0%, 95%)'; // Very light gray, almost white
+const DARK_TEXT_COLOR = 'hsl(0, 0%, 5%)';   // Very dark gray, almost black
 
 export default function MeetingTimeline({ agendaItems }: MeetingTimelineProps) {
   const router = useRouter();
@@ -68,10 +81,13 @@ export default function MeetingTimeline({ agendaItems }: MeetingTimelineProps) {
   const totalMeetingDurationMs = totalMeetingDurationMinutes * 60 * 1000;
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && document?.documentElement) {
       const colors = agendaItems.map((_, index) => {
         const itemBgColor = getAgendaItemColor(index);
-        return getLuminance(itemBgColor) > 0.5 ? 'hsl(var(--foreground))' : 'hsl(var(--background))';
+        const luminance = getLuminance(itemBgColor);
+        // If luminance is > 0.5 (lighter background), use dark text.
+        // Otherwise (darker background), use light text.
+        return luminance > 0.5 ? DARK_TEXT_COLOR : LIGHT_TEXT_COLOR;
       });
       setResolvedTextColors(colors);
     }
@@ -198,7 +214,7 @@ export default function MeetingTimeline({ agendaItems }: MeetingTimelineProps) {
               const itemEndTimeMs = itemStartTimeMs + itemDurationMs;
               const isPassed = totalElapsedTimeMs >= itemEndTimeMs;
               const isActive = currentAgendaItemIndex === index;
-              const textColor = resolvedTextColors[index] || 'hsl(var(--foreground))'; // Default if not resolved
+              const textColor = resolvedTextColors[index] || DARK_TEXT_COLOR; // Default to dark text if not resolved
 
               return (
                 <div
@@ -282,3 +298,4 @@ export default function MeetingTimeline({ agendaItems }: MeetingTimelineProps) {
     </div>
   );
 }
+
