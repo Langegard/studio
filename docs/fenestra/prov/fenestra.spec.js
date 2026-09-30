@@ -9,6 +9,15 @@ const BOTTNAR = ['#0B0E12', '#131922', '#1A2230'];
 
 function omatt(skal) { test.skip(true, 'OMÄTT: ' + skal); }
 
+// Sonden läser tillbaka sin egen bredd. Blev fönstret inte det begärda vägrar provet dom:
+// headless Chrome kan klämma fast bredden (375 begärt, 504 levererat) och då nås villkoret aldrig.
+const BEGARD = 375;
+async function kravBredd(page) {
+  const w = await page.evaluate(() => window.innerWidth);
+  if (w !== BEGARD) omatt(`begärd fönsterbredd ${BEGARD} px, fick ${w} px — villkoret nåddes inte`);
+  return w;
+}
+
 // WCAG 2.x relativ luminans och kontrastkvot, räknad i provet, aldrig hårdkodad.
 function lum([r, g, b]) {
   const f = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
@@ -26,7 +35,9 @@ test.describe('Fenestra', () => {
   test('A · 375×812 ger ingen horisontell rullning', async ({ page }) => {
     for (const url of ['/', '/d/prov-a.md', '/d/prov-tabell.md']) {
       await page.goto(url);
+      const w = await kravBredd(page);
       const { sw, cw } = await page.evaluate(() => ({ sw: document.scrollingElement.scrollWidth, cw: document.scrollingElement.clientWidth }));
+      expect(cw, url + ' clientWidth ska vara fönsterbredden').toBe(w);
       expect(sw, url).toBeLessThanOrEqual(cw);
     }
   });
@@ -161,6 +172,7 @@ test.describe('Fenestra', () => {
     const ctx = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
     await page.goto('http://127.0.0.1:4646/d/prov-a.md');
+    await kravBredd(page);
     await expect(page.locator('h1')).toBeVisible();
     await expect(page.getByText('Syntetisk mening 1 under rubrik 2')).toBeVisible();
     const bakgrund = await page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor);

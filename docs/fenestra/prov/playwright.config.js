@@ -14,7 +14,8 @@ module.exports = defineConfig({
   use: {
     baseURL: 'http://127.0.0.1:' + PORT,
     browserName: 'chromium',
-    viewport: { width: 375, height: 812 },
+    // FENESTRA_BREDD används bara av mutationskontrollen för att visa att sonden vägrar dom vid fel bredd.
+    viewport: { width: parseInt(process.env.FENESTRA_BREDD || '375', 10), height: 812 },
     deviceScaleFactor: 3,
     isMobile: true,
     hasTouch: true,

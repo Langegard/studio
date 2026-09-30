@@ -35,4 +35,11 @@ sed -i 's/@media (pointer: coarse) { input, textarea, select { font-size: 16px; 
 kor "fält 16px → 13px" "C ·"
 cp "$CSS.bak" "$CSS"
 
+echo "== sond: fönsterbredd 504 i stället för 375 (ska ge OMÄTT, inte GRÖNT)"
+if FENESTRA_BREDD=504 npx playwright test --grep "A ·" --reporter=./utfall-reporter.js 2>/dev/null | grep -q '^OMÄTT'; then
+  echo "   sonden vägrade dom som den ska"
+else
+  echo "   SONDEN DÖMDE VID FEL BREDD"; fall=1
+fi
+
 exit $fall
