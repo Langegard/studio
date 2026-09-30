@@ -1,0 +1,5 @@
+prov/node_modules/
+prov/test-results/
+prov/playwright-report/
+fixtur/prov-ljud.wav
+*.bak
