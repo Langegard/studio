@@ -9,6 +9,7 @@ värdnamn, adresser eller sökvägar. Det kontrolleras i CI.
 | [`usbserver-installera.sh`](usbserver-installera.sh) | Gör en Linux-nod till USB/IP-server och lägger till kommandot `usbdela`. Vägrar alltid lagringsenheter och hubbar. | [USB-topologi](../utredningar/usb-topologi.md), avsnitt 5 |
 | [`diarbank.py`](diarbank.py) | Kör bänkplanen för diarisering (B, R1–R4, R7 och kombinationen R8) en variabel i taget och sätter utredningens band GRÖNT/GRÅTT/RÖTT/OMÄTT på varje körning. | [Diarisering på RTX 3080](../utredningar/diarisering-rtx3080.md), avsnitt 4 |
 | [`diarjamfor.py`](diarjamfor.py) | Jämför två diariseringar (RTTM), till exempel Q8_0 mot BF16 eller en port mot sin referens. Mäter turer, DER (missat, falsklarm, förväxling) och etikettskillnad på 10 ms, och sätter banden för experiment 1–3. | [Svensk talarseparerad transkription](../utredningar/svensk-talarseparerad-transkription-2026.md), avsnitt 7 |
+| [`asrbank.py`](asrbank.py) | Mäter KB-Whisper i olika precision och storlek (WER och RTF) och sätter banden för utredning 2:s experiment 5 (fp16 mot int8) och 6 (small mot medium på CPU). | [Svensk talarseparerad transkription](../utredningar/svensk-talarseparerad-transkription-2026.md), avsnitt 7 |
 
 ## usbdjup
 
@@ -104,3 +105,28 @@ Talarna matchas optimalt med den ungerska metoden. Den är provad mot uttömmand
 **Avslutningskod:** `0` vid GRÖNT eller GRÅTT, `2` vid RÖTT, `1` vid fel. Verktyget läser bara tider och etiketter, aldrig ljud eller text.
 
 Prov: 16 st i `prov/test_diarjamfor.py`. De kräver inga beroenden.
+
+## asrbank
+
+```
+pip install faster-whisper pynvml                      # pynvml bara för grafikminnet
+python3 asrbank.py --manifest fleurs-sv-test.tsv --experiment 5            # large fp16 mot int8 på GPU
+python3 asrbank.py --manifest egna.tsv --experiment 6 --tradar 4           # small mot medium på CPU
+python3 asrbank.py --manifest m.tsv --varianter large:float16:cuda,large:int8:cuda --revision strict
+```
+
+**Manifestet** är en TSV med två kolumner, `ljudfil<TAB>referenstext`, och sökvägarna är relativa till manifestet. Utredningen föreslår FLEURS sv_se test (CC BY 4.0), där KBLab redovisar 5,4 % WER för large i fp16. Ljudet och transkriptionerna finns i datasetrepot `google/fleurs` på Hugging Face, under `data/sv_se/`. Kontrollera kolumnernas namn där innan Du bygger manifestet [I].
+
+**Avkodningen är fast:** svenska, beam 5, `condition_on_previous_text=False` (KBLab:s råd mot hallucinationer) och ingen VAD. Bara variabeln ändras mellan körningarna.
+
+**WER** räknas på hela korpusen efter normalisering: gemener, skiljetecken bort, blanksteg ihopslagna. Å, ä och ö behålls, men siffror normaliseras inte.
+
+**RTF** är beräkningstid delad med ljudlängd. Laddningstiden redovisas för sig. Grafikminnet är toppen för hela kortet, som pynvml ser det, och blir OMÄTT utan pynvml.
+
+**Band (utredningens avsnitt 7):**
+- **Experiment 5:** ΔWER(int8 − fp16) ≤ 0,3 procentenheter ger GRÖNT, 0,3–1,0 GRÅTT och över 1,0 RÖTT, och då är fp16 obligatoriskt på GPU.
+- **Experiment 6:** medium RTF ≤ 0,5 ger GRÖNT, 0,5–1,0 GRÅTT och över 1,0 RÖTT, och då gäller small på CPU-noden.
+
+Bänken sparar inga transkript. **Läge:** provad mot en attrapp, **inte körd med riktiga modeller än (OMÄTT)**. API-anropen följer faster-whisper 1.2.1.
+
+Prov: 18 st i `prov/test_asrbank.py`. De kräver inga beroenden.

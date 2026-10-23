@@ -253,7 +253,7 @@ Detta är kärnfrågan för referensfyndet (Q8_0 tappade 9 av 161 turer på 311 
 
 ## 7. Rekommenderad provordning
 
-**Verktyg (tillägg 23/10):** jämförelsen i experiment 1–3 görs av [`docs/verktyg/diarjamfor.py`](../verktyg/diarjamfor.py). Det tar två RTTM-filer eller kataloger och sätter banden nedan automatiskt.
+**Verktyg (tillägg 23/10):** jämförelsen i experiment 1–3 görs av [`docs/verktyg/diarjamfor.py`](../verktyg/diarjamfor.py). Det tar två RTTM-filer eller kataloger och sätter banden nedan automatiskt. Experiment 5 och 6 körs med [`docs/verktyg/asrbank.py`](../verktyg/asrbank.py) (WER och RTF för KB-Whisper).
 
 Alla experiment: 16 kHz mono, samma ljudfiler, fasta versioner/commits loggade. DER rapporteras med collar 0 och overlap inkluderad enligt NVIDIA:s konvention ([diarization_evaluation.md](https://huggingface.co/nvidia/Nemotron-3-Diarization/blob/main/diarization_evaluation.md)). Tröskelvärdena är **[I]** och satta utifrån de publicerade paritetsdata ovan.
 
