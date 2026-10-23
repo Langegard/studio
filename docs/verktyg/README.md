@@ -65,6 +65,8 @@ Utan `--ref` mäts DER mot baslinjens egen utdata (självkonsistens).
 
 **Testklipp:** bara grönt ljud. Utredningen föreslår AMI-mötet ES2004a, som är CC BY 4.0. Referenser i RTTM finns i [pyannote/AMI-diarization-setup](https://github.com/pyannote/AMI-diarization-setup). Bänken sparar inga transkript och ingen utdata, bara tider, minne och fel. Token läses ur en miljövariabel och skrivs aldrig ut.
 
+**Turparitet:** med `--rttm-katalog d/` sparas varje variants diarisering som `d/<körning>.rttm`. Sedan avgör `python3 diarjamfor.py --ref d/B.rttm --hyp d/R4b.rttm` om ändringen flyttade talarturerna. Spara bara RTTM för testklipp: RTTM från riktigt ljud är husdata.
+
 **Tidsåtgång:** med standardvärdena blir det ungefär 40 körningar. Går ett 9-minutersklipp i referensmätningens takt, cirka 3 minuter per körning, tar bänken ett par timmar. Börja med `--upprepa 1`, eller ett urval med `--korningar B,R2,R4b`.
 
 **Avslutningskod:**

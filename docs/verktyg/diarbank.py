@@ -246,6 +246,11 @@ class Attrapp:
     def talare(self, ann):
         return ann["talare"]
 
+    def rttm(self, ann):
+        turer = 100 - round(ann["der_pp"] * 10)
+        return "".join(f"SPEAKER attrapp 1 {i:.3f} 1.000 <NA> <NA> T{i % 4} <NA> <NA>\n"
+                       for i in range(turer))
+
     def ladda_ref(self, sokvag):
         return {"der_pp": 0.0, "talare": 4, "referens": True}
 
@@ -358,6 +363,9 @@ class Pyannote:
     def talare(self, ann):
         return len(ann.labels())
 
+    def rttm(self, ann):
+        return ann.to_rttm()
+
     def ladda_ref(self, sokvag):
         from pyannote.database.util import load_rttm
         alla = load_rttm(sokvag)
@@ -456,6 +464,15 @@ def delta(mat, bas):
     return None
 
 
+def spara_rttm(motor, args, kod, hyp):
+    """Skriver en variants diarisering till <katalog>/<körning>.rttm, om det begärts."""
+    if not args.rttm_katalog or hyp is None:
+        return
+    os.makedirs(args.rttm_katalog, exist_ok=True)
+    with open(os.path.join(args.rttm_katalog, f"{kod}.rttm"), "w", encoding="utf-8") as f:
+        f.write(motor.rttm(hyp))
+
+
 def tabell(resultat):
     rader = ["| Körning | Ändring | RTFx varm | Mot B | DER-Δ (pe) | VRAM res. | Band | Skäl |",
              "|---|---|---|---|---|---|---|---|"]
@@ -486,6 +503,8 @@ def main(argv):
     ap.add_argument("--korningar", help="kommaseparerat urval, t.ex. B,R2,R4b")
     ap.add_argument("--ingen-kombination", action="store_true", help="hoppa över R8")
     ap.add_argument("--ut", help="spara resultatet som JSON")
+    ap.add_argument("--rttm-katalog", help="spara varje variants diarisering som <körning>.rttm "
+                    "(för diarjamfor.py; bara för testklipp, aldrig för riktigt ljud)")
     ap.add_argument("--lista", action="store_true", help="visa planen och avsluta")
     ap.add_argument("--attrapp", action="store_true", help="simulerad motor (prov)")
     args = ap.parse_args(argv[1:])
@@ -531,6 +550,7 @@ def main(argv):
         mat, hyp = mat_variant(motor, kalla, inst, args, ljud_s, ref, bas_hyp, kall=(kod == "B"))
         if kod == "B":
             bas_hyp = hyp
+        spara_rttm(motor, args, kod, hyp)
         resultat[kod] = {"beskrivning": besk, **mat}
 
     def satt_band():
@@ -543,7 +563,8 @@ def main(argv):
     inst = {} if args.ingen_kombination else kombination(resultat)
     if inst:
         print("… R8 (kombination)", file=sys.stderr, flush=True)
-        mat, _ = mat_variant(motor, kalla, inst, args, ljud_s, ref, bas_hyp)
+        mat, hyp = mat_variant(motor, kalla, inst, args, ljud_s, ref, bas_hyp)
+        spara_rttm(motor, args, "R8", hyp)
         resultat["R8"] = {"beskrivning": "kombination: " + ", ".join(
             f"{k}={v}" for k, v in sorted(inst.items())), **mat}
         satt_band()

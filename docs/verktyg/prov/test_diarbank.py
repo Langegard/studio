@@ -136,6 +136,19 @@ class Torrkorning(unittest.TestCase):
         kod, _, j = torrkorning("--korningar", "R2", "--ingen-kombination")
         self.assertEqual(sorted(j["resultat"]), ["B", "R2"])
 
+    def test_rttm_katalog_kan_jamforas_med_diarjamfor(self):
+        with tempfile.TemporaryDirectory() as d:
+            kod, _, _ = kor("--attrapp", "--upprepa", "1", "--korningar", "R4b",
+                            "--ingen-kombination", "--rttm-katalog", d)
+            self.assertEqual(kod, 0)
+            self.assertEqual(sorted(os.listdir(d)), ["B.rttm", "R4b.rttm"])
+            jamfor = os.path.join(HAR, "..", "diarjamfor.py")
+            r = subprocess.run([sys.executable, jamfor, "--ref", os.path.join(d, "B.rttm"),
+                                "--hyp", os.path.join(d, "R4b.rttm"), "--experiment", "2"],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 2)          # 8 % färre turer: rött i experiment 2
+            self.assertIn("-8.0 %", r.stdout)
+
     def test_attrappen_laddar_inte_torch(self):
         self.assertNotIn("torch", sys.modules)
 
