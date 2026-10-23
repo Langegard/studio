@@ -281,7 +281,10 @@ def main(argv):
                 summa["tal_facit"] += fr["tal"]
             else:
                 m["der_matt"] = m["der"]
-            m["band"], m["skal"] = band(args.experiment, m["der_matt"], m["turavvikelse"])
+            if m["ramar"]["tal"] == 0 and m["talare_hyp"] == 0 and (not f or m.get("der_matt") is None):
+                m["band"], m["skal"] = GRONT, "inget tal i någon av filerna"
+            else:
+                m["band"], m["skal"] = band(args.experiment, m["der_matt"], m["turavvikelse"])
             rader.append(m)
             for k in ("tal", "missat", "falsk", "forvaxl", "olika", "alla"):
                 summa[k] += m["ramar"][k]
@@ -308,7 +311,10 @@ def main(argv):
                                  if t else None)
         else:
             total["der_matt"] = total["der"]
-        total["band"], total["skal"] = band(args.experiment, total["der_matt"], total["turavvikelse"])
+        if summa["tal"] == 0 and all(m["talare_hyp"] == 0 for m in rader):
+            total["band"], total["skal"] = GRONT, "inget tal i någon av filerna"
+        else:
+            total["band"], total["skal"] = band(args.experiment, total["der_matt"], total["turavvikelse"])
 
         matt = "DER-skillnad mot facit" if args.facit else "DER med ref som facit"
         print(f"Experiment {args.experiment}: {len(rader)} fil(er), referens = {args.ref}, "

@@ -75,6 +75,12 @@ class Band(unittest.TestCase):
         self.assertEqual(ab.band(5, [f, annan])[0], ab.OMATT)
         self.assertEqual(ab.band(5, [f, cpu])[0], ab.OMATT)
 
+    def test_experiment_5_hittar_ett_senare_giltigt_par(self):
+        lista = [self.r("KBLab/kb-whisper-medium", "float16", wer=6.6),
+                 self.r("KBLab/kb-whisper-large", "float16", wer=5.4),
+                 self.r("KBLab/kb-whisper-large", "int8", wer=5.6)]
+        self.assertEqual(ab.band(5, lista)[0], ab.GRONT)
+
     def test_experiment_5_utan_int8_ar_omatt(self):
         self.assertEqual(ab.band(5, [self.r("x", "float16", wer=5.0)])[0], ab.OMATT)
 

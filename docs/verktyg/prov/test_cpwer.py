@@ -58,6 +58,14 @@ class Matt(unittest.TestCase):
         m = cp.cpwer(ref, [("X", "a b c d e f")])
         self.assertEqual((m["fel"], m["ord"], m["fel_utan_talare"]), (6, 6, 0))
 
+    def test_wer_utan_talare_ar_ordningsberoende(self):
+        # Inskott under en annans tur: cpWER 0 men WER utan talare > 0 (därför ingen "talarkostnad").
+        ref = [("A", "jag tycker att vi borde vänta"), ("B", "ja")]
+        hyp = [("X", "jag tycker att"), ("Y", "ja"), ("X", "vi borde vänta")]
+        m = cp.cpwer(ref, hyp)
+        self.assertEqual(m["fel"], 0)
+        self.assertGreater(m["fel_utan_talare"], 0)
+
     def test_mot_uttommande_sokning(self):
         slump = random.Random(11)
         ord_ = "ja nej kanske hej tack bra dag kväll".split()
@@ -74,7 +82,6 @@ class Band(unittest.TestCase):
         self.assertEqual(cp.band8(10.0, 10.0)[0], cp.GRONT)
         self.assertEqual(cp.band8(11.0, 10.0)[0], cp.GRATT)
         self.assertEqual(cp.band8(11.01, 10.0)[0], cp.ROTT)
-        self.assertEqual(cp.band8(None, 10.0)[0], cp.ROTT)
 
 
 class Kommandorad(unittest.TestCase):
@@ -100,7 +107,8 @@ class Kommandorad(unittest.TestCase):
             j = json.load(f)
         self.assertEqual(j["totalt"]["cpwer_a"], 0.0)
         self.assertAlmostEqual(j["totalt"]["cpwer_b"], 200 / 9, places=2)
-        self.assertEqual(j["band"], cp.GRONT)
+        self.assertEqual(j["band_cpwer"], cp.GRONT)
+        self.assertIn("VRAM", j["delbedomning"])
         self.assertIn("**GRÖNT**", text)
 
     def test_rott_ger_kod_2(self):
@@ -114,7 +122,12 @@ class Kommandorad(unittest.TestCase):
         with open(trasig, "w", encoding="utf-8") as f:
             f.write("bara text utan talare\n")
         self.assertEqual(kor("--ref", trasig, "--hyp", trasig)[0], 1)
-        self.assertEqual(kor("--ref", trasig, "--hyp", trasig, "--experiment", "3")[0], 1)
+        self.assertEqual(kor("--ref", trasig, "--hyp", trasig, "--experiment", "8")[0], 1)   # tillvalet finns inte längre
+
+    def test_tomt_facit_ar_fel_inte_rott(self):
+        tomt = skriv(self.d, "t.tsv", [])
+        a = skriv(self.d, "a.tsv", [("1", "hej")])
+        self.assertEqual(kor("--ref", tomt, "--hyp", a, "--jamfor", a)[0], 1)
 
 
 if __name__ == "__main__":

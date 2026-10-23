@@ -115,7 +115,10 @@ def band(experiment, resultat):
     if experiment == 5:
         fp16 = next((r for r in resultat if r["precision"] in ("float16", "bfloat16")), None)
         int8 = next((r for r in resultat if r["precision"].startswith("int8")
-                     and fp16 and r["modell"] == fp16["modell"] and r["enhet"] == fp16["enhet"]), None)
+                     and any(f["modell"] == r["modell"] and f["enhet"] == r["enhet"]
+                             and f["precision"] in ("float16", "bfloat16") for f in resultat)), None)
+        fp16 = next((f for f in resultat if int8 and f["precision"] in ("float16", "bfloat16")
+                     and f["modell"] == int8["modell"] and f["enhet"] == int8["enhet"]), fp16)
         if not fp16 or not int8 or fp16.get("wer") is None or int8.get("wer") is None:
             return OMATT, "behöver en fp16- och en int8-variant av samma modell på samma enhet"
         d = round(int8["wer"] - fp16["wer"], 3)
@@ -198,8 +201,13 @@ class FasterWhisper:
 class Minne:
     """Grafikminne under en variant, i GiB, om pynvml finns. Mäter hela kortet.
 
-    Baslinjen läses innan modellen laddas, så att topp − bas visar variantens del.
-    Kortet väljs ur CUDA_VISIBLE_DEVICES (första numret), annars kort 0.
+    Baslinjen läses innan modellen laddas. Den första CUDA-varianten skapar
+    CUDA-kontexten, som sedan finns kvar; dess topp − bas innehåller därför
+    kontexten, och senare varianters gör det inte. Jämför toppvärdena, inte
+    skillnaderna, eller kör varianterna i var sin process.
+    Kortet väljs ur CUDA_VISIBLE_DEVICES: ett nummer (med CUDA_DEVICE_ORDER=
+    PCI_BUS_ID, som main sätter, så att CUDA och NVML räknar lika) eller ett
+    UUID. Går kortet inte att avgöra blir minnet OMÄTT.
     """
     def __init__(self, aktiv):
         self.bas = self.topp = None
@@ -211,7 +219,13 @@ class Minne:
             pynvml.nvmlInit()
             synliga = os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",")[0].strip()
             self.nv = pynvml
-            self.h = pynvml.nvmlDeviceGetHandleByIndex(int(synliga) if synliga.isdigit() else 0)
+            if synliga.isdigit():
+                self.h = pynvml.nvmlDeviceGetHandleByIndex(int(synliga))
+            elif synliga.startswith("GPU-"):
+                self.h = pynvml.nvmlDeviceGetHandleByUUID(synliga)
+            else:
+                self.h = None                    # t.ex. MIG: OMÄTT hellre än fel kort
+                return
             self.kort = pynvml.nvmlDeviceGetName(self.h)
         except Exception:                        # noqa: BLE001 — utan pynvml blir det OMÄTT
             self.h = None
@@ -304,6 +318,7 @@ def main(argv):
     ap.add_argument("--ut", help="spara resultatet som JSON")
     ap.add_argument("--attrapp", action="store_true", help="simulerad motor (prov)")
     args = ap.parse_args(argv[1:])
+    os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")   # samma kortordning som NVML
 
     varianter = args.varianter.split(",") if args.varianter else STANDARD[args.experiment]
     try:

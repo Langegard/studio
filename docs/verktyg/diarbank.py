@@ -140,6 +140,8 @@ def band(kod, mat, bas, cfg):
             return GRONT, f"{s:+.0%}"
         return (GRATT if s >= -0.10 else ROTT), f"{s:+.0%}"
     if kod == "R2":
+        if s < 0.05:
+            return ROTT, f"{s:+.0%}" + ("" if har(d) else ", DER-Δ omätt")
         if not har(d):
             return OMATT, f"{s:+.0%}, DER-Δ kräver --ref"
         if s >= 0.25 and d <= 0.3:
@@ -155,10 +157,12 @@ def band(kod, mat, bas, cfg):
             return GRONT, f"{s:+.0%}, reserverat {res:.1f} GiB"
         return GRATT, f"{s:+.0%}, reserverat {fmt(res, ' GiB')}"
     if kod in ("R4a", "R4b"):
-        if not har(d):
-            return OMATT, f"{f:.2f}×, DER-Δ kräver --ref"
         gron, rod, dg, dr = ((1.6, 1.2, 0.5, 1.5) if kod == "R4a"
                              else (2.5, 1.5, 1.0, 3.0))
+        if f < rod and not har(d):
+            return ROTT, f"{f:.2f}×, DER-Δ omätt"
+        if not har(d):
+            return OMATT, f"{f:.2f}×, DER-Δ kräver --ref"
         fel_talare = kod == "R4b" and mat.get("talarfel")
         if f >= gron and d <= dg and not fel_talare:
             return GRONT, f"{f:.2f}×, DER-Δ {d:+.2f}"
@@ -172,6 +176,8 @@ def band(kod, mat, bas, cfg):
         varm = mat.get("rtfx_varm")
         if varm < 5:
             return ROTT, f"RTFx {varm:.1f}× < 5×: byt motor (R9/R10)"
+        if not har(d):
+            return OMATT, f"RTFx {varm:.1f}×, DER-Δ kräver --ref"
         if varm >= 10 and har(d) and d <= 1.0:
             return GRONT, f"RTFx {varm:.1f}×, DER-Δ {d:+.2f}"
         return GRATT, f"RTFx {varm:.1f}×, DER-Δ {fmt(d)}"
@@ -197,10 +203,15 @@ def kombination(resultat):
 
 
 def tolkningsregel(resultat):
-    """Utredningens tolkningsregel: B rött och R1–R7 alla gråa → felsök miljön."""
+    """Utredningens tolkningsregel: B rött och ingen av R1–R7 hjälpte → felsök miljön.
+
+    Utredningen säger "R1–R7 alla gråa". Här räknas den som uppfylld när ingen
+    av dem blev GRÖNT, så att en OOM-röd R3 eller en OMÄTT utan referens inte
+    hindrar varningen.
+    """
     b = resultat.get("B", {}).get("band")
     ovriga = [r.get("band") for k, r in resultat.items() if k not in ("B", "R8")]
-    return bool(b == ROTT and ovriga and all(x == GRATT for x in ovriga))
+    return bool(b == ROTT and ovriga and GRONT not in ovriga)
 
 
 def fmt(x, enhet=""):
@@ -469,17 +480,18 @@ def mat_variant(motor, kalla, inst, args, ljud_s, ref, bas_hyp, kall=False):
     })
     if kall:
         mat["kall_minus_varm"] = round(mat["vagg_kall"] - varm, 3)
-    if ref is not None:
-        mat["der_ref_c0"] = motor.der(ref, sista["hyp"], 0.0)
-        mat["der_ref_c25"] = motor.der(ref, sista["hyp"], 0.5)   # pyannote: total bredd = ±0,25 s
-        mat["talare_ref"] = motor.talare(ref)
-    elif bas_hyp is not None:
-        mat["der_sjalv_c0"] = motor.der(bas_hyp, sista["hyp"], 0.0)
-    if ref is not None:
-        mat["talarfel"] = mat["talare"] != mat["talare_ref"]
-    elif bas_hyp is not None:
-        # Utan referens: räkna bara om ändringen själv flyttade talarantalet.
-        mat["talarfel"] = mat["talare"] != motor.talare(bas_hyp)
+    try:
+        if ref is not None:
+            mat["der_ref_c0"] = motor.der(ref, sista["hyp"], 0.0)
+            mat["der_ref_c25"] = motor.der(ref, sista["hyp"], 0.5)   # pyannote: total bredd = ±0,25 s
+            mat["talare_ref"] = motor.talare(ref)
+            mat["talarfel"] = mat["talare"] != mat["talare_ref"]
+        elif bas_hyp is not None:
+            mat["der_sjalv_c0"] = motor.der(bas_hyp, sista["hyp"], 0.0)
+            # Utan referens: räkna bara om ändringen själv flyttade talarantalet.
+            mat["talarfel"] = mat["talare"] != motor.talare(bas_hyp)
+    except Exception as e:                       # noqa: BLE001 — tiderna behålls, DER blir omätt
+        mat["der_fel"] = f"{type(e).__name__}: {e}"[:200]
     return mat, sista["hyp"]
 
 
@@ -518,8 +530,16 @@ def tabell(resultat):
     return "\n".join(rader)
 
 
+class Tolk(argparse.ArgumentParser):
+    """Felaktiga argument ger kod 1, så att kod 2 alltid betyder att rimlighetskontrollen föll."""
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        print(f"{self.prog}: fel: {message}", file=sys.stderr)
+        sys.exit(1)
+
+
 def main(argv):
-    ap = argparse.ArgumentParser(prog="diarbank", description=__doc__.split("\n\n")[0])
+    ap = Tolk(prog="diarbank", description=__doc__.split("\n\n")[0])
     ap.add_argument("--ljud", help="testklipp (wav, 16 kHz mono rekommenderas)")
     ap.add_argument("--ref", help="referens i RTTM; utan den mäts DER mot baslinjens utdata")
     ap.add_argument("--talare", type=int, help="känt antal talare; slår på R7")
@@ -527,7 +547,8 @@ def main(argv):
     ap.add_argument("--modell", default="pyannote/speaker-diarization-community-1")
     ap.add_argument("--token-variabel", default="HF_TOKEN")
     ap.add_argument("--enhet", default="cuda")
-    ap.add_argument("--vram-tak-gib", type=float, default=9.0, help="R3:s gräns för reserverat minne (GiB)")
+    ap.add_argument("--vram-tak-gib", type=float, default=round(9e9 / 2**30, 2),
+                    help="R3:s gräns för reserverat minne i GiB; standard = utredningens 9 GB (8,38 GiB)")
     ap.add_argument("--korningar", help="kommaseparerat urval, t.ex. B,R2,R4b")
     ap.add_argument("--ingen-kombination", action="store_true", help="hoppa över R8")
     ap.add_argument("--ut", help="spara resultatet som JSON")
@@ -593,10 +614,13 @@ def main(argv):
         print(f"… {kod} ({besk})", file=sys.stderr, flush=True)
         try:
             mat, hyp = mat_variant(motor, kalla, inst, args, ljud_s, ref, bas_hyp, kall=kall)
-            spara_rttm(motor, args, kod, hyp)
         except Exception as e:                   # noqa: BLE001 — varianten blir OMÄTT, bänken fortsätter
             print(f"   {kod} föll: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
             mat, hyp = {"inst": inst, "oom": False, "fel": f"{type(e).__name__}: {e}"[:200]}, None
+        try:
+            spara_rttm(motor, args, kod, hyp)
+        except Exception as e:                   # noqa: BLE001 — mätningen behålls
+            mat["rttm_fel"] = f"{type(e).__name__}: {e}"[:200]
         resultat[kod] = {"beskrivning": besk, **mat}
         satt_band()
         spara()

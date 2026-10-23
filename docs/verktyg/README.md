@@ -63,7 +63,11 @@ Den mäter:
 
 **DER-banden (R2, R4, R8) bedöms bara med `--ref`.** Utredningen mäter DER-skillnaden mot en referens. Utan `--ref` redovisas självkonsistensen, alltså DER mot baslinjens egen utdata, i en egen kolumn, och DER-banden blir OMÄTT. **Fel antal talare i R4b** jämförs med referensen när den finns, annars med baslinjen.
 
-**R3** provar batch 64 och 128. community-1 kör redan 32, så 32 är baslinjen. Grafikminnet anges i GiB, och gränsen för R3 är `--vram-tak-gib 9`.
+**R3** provar batch 64 och 128. community-1 kör redan 32, så 32 är baslinjen. Grafikminnet anges i GiB, och gränsen för R3 är som standard utredningens 9 GB, det vill säga 8,38 GiB (`--vram-tak-gib`).
+
+**Utan `--ref` gäller fartens röda gränser ändå.** R2 under +5 %, R4a under 1,2× och R4b under 1,5× blir RÖTT. Bara de gröna och gråa banden kräver DER.
+
+**Tolkningsregeln** varnar när B är RÖTT och ingen av R1–R7 blev GRÖNT. Utredningen säger "alla gråa". Här hindrar alltså varken en OOM-röd R3 eller ett OMÄTT utan referens varningen.
 
 **Stegtider:** förutom stegen redovisas inläsningen (tiden före första hook-anropet) och klustringen (tiden efter sista embeddings-anropet) för sig.
 
@@ -78,9 +82,9 @@ Den mäter:
 **Avslutningskod:**
 - `0`: klart.
 - `2`: rimlighetskontrollen föll, eftersom segmenteringsmodellen inte ligger på GPU:n. Felsök då torch-bygget och drivrutinen innan något annat mäts.
-- `1`: fel.
+- `1`: fel, även felaktiga argument.
 
-Faller en enskild variant, till exempel av minnesbrist (också pyannotes `MemoryError` i segmenteringen) eller av något annat fel, blir den OMÄTT eller RÖTT och bänken fortsätter. JSON-filen skrivs efter varje variant. Ljudlängden läses ur WAV-huvudet, så baslinjens kallstart blir verkligt kall.
+Faller en enskild variant, till exempel av minnesbrist (också pyannotes `MemoryError` i segmenteringen) eller av något annat fel, blir den OMÄTT eller RÖTT och bänken fortsätter. Fel vid DER-beräkningen eller när RTTM sparas tar inte bort de uppmätta tiderna. JSON-filen skrivs efter varje variant. Ljudlängden läses ur WAV-huvudet, så baslinjens kallstart blir verkligt kall.
 
 **Läge:** syntaxkontrollerad, och provad mot en attrapp som återger referensmätningens takt. Attrappen täcker banden, kombinationen, urvalet och DER mot referens och mot baslinjen. **Bänken är inte körd på en GPU än. Dess första riktiga mätning är OMÄTT** tills någon har gjort den. Kodvägen mot pyannote följer källan till 4.0.7.
 
@@ -111,9 +115,9 @@ Talarna matchas optimalt med den ungerska metoden. Den är provad mot uttömmand
 - **Experiment 2 och 3:** GRÖNT vid turer inom ±2 % och DER ≤ 0,5 %. RÖTT vid turer utanför ±6 % eller DER > 1,5 %.
 - Däremellan GRÅTT.
 
-**Avslutningskod:** `0` vid GRÖNT eller GRÅTT, `2` om totalen eller någon enskild fil är RÖTT, `1` vid fel, även felaktiga argument. Totalen räknas på summerade ramar, och den största avvikelsen i turer per fil redovisas. Filer med BOM läses rätt. Verktyget läser bara tider och etiketter, aldrig ljud eller text.
+**Avslutningskod:** `0` vid GRÖNT eller GRÅTT, `2` om totalen eller någon enskild fil är RÖTT, `1` vid fel, även felaktiga argument. Totalen räknas på summerade ramar, och den största avvikelsen i turer per fil redovisas. Två filer utan tal räknas som överensstämmelse (GRÖNT). Filer med BOM läses rätt. Verktyget läser bara tider och etiketter, aldrig ljud eller text.
 
-Prov: 20 st i `prov/test_diarjamfor.py`. De kräver inga beroenden.
+Prov: 21 st i `prov/test_diarjamfor.py`. De kräver inga beroenden.
 
 ## asrbank
 
@@ -140,41 +144,48 @@ python3 asrbank.py --manifest m.tsv --varianter large:float16:cuda,large:int8_fl
 
 Å, ä och ö behålls, men siffror normaliseras inte. Normaliseringen är densamma för alla varianter, så skillnaden mellan dem är rättvis, men nivån går inte att jämföra med KBLab:s siffror.
 
-**RTF** är beräkningstid delad med ljudlängd. Laddningstiden redovisas för sig, och första gången ingår nedladdningen. Grafikminnet anges i GiB som topp och baslinje för det kort som `CUDA_VISIBLE_DEVICES` pekar på. Utan pynvml blir det OMÄTT.
+**RTF** är beräkningstid delad med ljudlängd. Laddningstiden redovisas för sig, och första gången ingår nedladdningen.
+
+**Grafikminnet:**
+- anges i GiB som topp och baslinje för det kort som `CUDA_VISIBLE_DEVICES` pekar på, med nummer eller UUID;
+- `CUDA_DEVICE_ORDER=PCI_BUS_ID` sätts, så att CUDA och NVML räknar korten lika;
+- den första CUDA-varianten skapar CUDA-kontexten, och kontexten ligger kvar. Jämför därför toppvärdena, inte skillnaden mellan topp och baslinje;
+- blir OMÄTT utan pynvml.
 
 **JSON-filen** loggar versioner och miljö: Python, faster-whisper, CTranslate2, plattform, processor, trådar och effektiv precision. Utredningen kräver att versionerna loggas.
 
 **Band (utredningens avsnitt 7):**
 - **Experiment 5:** ΔWER(int8 − fp16) ≤ 0,3 procentenheter ger GRÖNT, 0,3–1,0 GRÅTT och över 1,0 RÖTT, och då är fp16 obligatoriskt på GPU.
 - **Experiment 6:** medium RTF ≤ 0,5 ger GRÖNT, 0,5–1,0 GRÅTT och över 1,0 RÖTT, och då gäller small på CPU-noden. Bänken mäter bara ct2-delen; whisper.cpp q5_0 är OMÄTT.
-- **Experiment 5 kräver** samma modell och enhet för fp16- och int8-varianten, annars blir bandet OMÄTT.
+- **Experiment 5 kräver** samma modell och enhet för fp16- och int8-varianten, annars blir bandet OMÄTT. Bänken letar upp ett sådant par bland alla varianter.
 
 Bänken sparar inga transkript. **Läge:** provad mot en attrapp, **inte körd med riktiga modeller än (OMÄTT)**. API-anropen följer faster-whisper 1.2.1.
 
-Prov: 19 st i `prov/test_asrbank.py`. De kräver inga beroenden.
+Prov: 20 st i `prov/test_asrbank.py`. De kräver inga beroenden.
 
 ## cpwer
 
 ```
 python3 cpwer.py --ref facit.tsv --hyp kedja-a.tsv
-python3 cpwer.py --ref facit/ --hyp kedja-a/ --jamfor kedja-b/ --experiment 8 --ut resultat.json
+python3 cpwer.py --ref facit/ --hyp nemotron/ --jamfor whisperx/ --ut resultat.json
 ```
 
 Transkripten är TSV-filer med en replik per rad i tidsordning: `talare<TAB>text`. Med kataloger paras filerna ihop på filnamn.
 
 **cpWER:** varje talares ord läggs i följd. Hypotesens talare paras sedan med facits talare så att felen blir så få som möjligt (CHiME-6). En talare utan motpart räknas med alla sina ord som fel. Ett rätt ord hos fel talare kostar alltså också.
 
-**Utskriften visar:**
-- cpWER;
-- WER utan talare, alltså samma ord i tidsordning;
-- talarkostnaden, cpWER − WER, det som felaktig talartillskrivning kostar.
+**Utskriften visar** cpWER och WER utan talare, alltså alla repliker i filens ordning. WER utan talare beror på hur repliker från olika talare är ordnade, till exempel ett "ja" inskjutet mitt i någon annans tur. Den kan därför bli både högre och lägre än cpWER, och skillnaden redovisas inte som en "talarkostnad".
 
-**Band:** med `--jamfor` sätts experiment 8:s band på kedja A mot kedja B. A ≤ B ger GRÖNT, högst +1 procentenhet GRÅTT, mer RÖTT. Utredningens krav på grafikminne mäts med `diarbank.py` och `asrbank.py`.
+**Band:** riktningen är fast. `--hyp` är Nemotron-kedjan och `--jamfor` är whisperX-kedjan.
+- Nemotron ≤ whisperX ger GRÖNT, högst +1 procentenhet GRÅTT och mer än så RÖTT.
+- Bandet täcker bara cpWER-halvan och sparas som `band_cpwer`.
+- Utredningens krav på grafikminne (≤ 5,0 GB för hela kedjan) saknar verktyg, eftersom diarbank inte kör Nemotron.
+- Experiment 7:s huvudmått, andel ord med rätt talare, kräver ordtider och ingår inte.
 
 **Beroenden:** normaliseringen och ordfelen kommer från `asrbank.py` och talarparningen från `diarjamfor.py`, så filerna hör ihop. Parningen är provad mot uttömmande sökning i 150 slumpfall.
 
-**Avslutningskod:** `0` klart, `2` RÖTT, `1` fel.
+**Avslutningskod:** `0` klart, `2` RÖTT, `1` fel, även tomt facit och felaktiga argument.
 
 **Facit måste vara grönt:** påhittade eller iscensatta möten, aldrig riktiga.
 
-Prov: 7 st i `prov/test_cpwer.py`.
+Prov: 9 st i `prov/test_cpwer.py`.

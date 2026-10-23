@@ -57,6 +57,12 @@ class Band(unittest.TestCase):
         self.assertEqual(self.b("R2", rtfx_varm=2.09, der_delta_pp=0.0), db.ROTT)
         self.assertEqual(self.b("R2", rtfx_varm=2.2, der_delta_pp=0.0), db.GRATT)
 
+    def test_fartrott_galler_aven_utan_referens(self):
+        self.assertEqual(self.b("R2", rtfx_varm=2.05), db.ROTT)           # +2,5 % < +5 %
+        self.assertEqual(self.b("R2", rtfx_varm=2.6), db.OMATT)           # snabbt nog, DER omätt
+        self.assertEqual(self.b("R4b", rtfx_varm=2.9), db.ROTT)           # 1,45× < 1,5×
+        self.assertEqual(self.b("R8", rtfx_varm=12.0), db.OMATT)
+
     def test_r3_minne_och_oom(self):
         self.assertEqual(self.b("R3-64", rtfx_varm=2.4, vram_reserverat_gib=8.9), db.GRONT)
         self.assertEqual(self.b("R3-64", rtfx_varm=2.4, vram_reserverat_gib=9.0), db.GRATT)
@@ -93,6 +99,11 @@ class Hjalp(unittest.TestCase):
         r["R2"]["band"] = db.GRONT
         self.assertFalse(db.tolkningsregel(r))
 
+    def test_tolkningsregel_med_omatt_och_oom(self):
+        r = {"B": {"band": db.ROTT}, "R2": {"band": db.OMATT}, "R3-128": {"band": db.ROTT},
+             "R1": {"band": db.GRATT}}
+        self.assertTrue(db.tolkningsregel(r))
+
     def test_kombination_tar_snabbaste_grona_per_familj(self):
         r = {"B": {"band": db.ROTT},
              "R2": {"band": db.GRONT, "inst": {"tf32": True}},
@@ -103,6 +114,13 @@ class Hjalp(unittest.TestCase):
 
 
 class Torrkorning(unittest.TestCase):
+    def test_felaktiga_argument_ger_kod_1(self):
+        self.assertEqual(kor("--upprepa", "x")[0], 1)
+
+    def test_vram_tak_ar_utredningens_9_gb(self):
+        self.assertIn("8,38 GiB", subprocess.run([sys.executable, VERKTYG, "--help"],
+                                                 capture_output=True, text=True).stdout)
+
     def test_lista(self):
         kod, text, _ = kor("--lista")
         self.assertEqual(kod, 0)

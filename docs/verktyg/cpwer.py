@@ -3,32 +3,39 @@
 
 Utredning 2 (docs/utredningar/svensk-talarseparerad-transkription-2026.md,
 avsnitt 7) mäter hela kedjan, transkription plus diarisering, med cpWER
-(experiment 7 och 8). cpWER är WER efter att varje talares ord har lagts i
+(experiment 8, och som delmått i experiment 7). Experiment 7:s huvudmått,
+andel ord med korrekt talare, kräver ordtider och ingår inte här (OMÄTT). cpWER är WER efter att varje talares ord har lagts i
 följd och talarna i hypotesen har parats med talarna i facit så att felen
 blir så få som möjligt (CHiME-6). Ett ord som hamnar hos fel talare kostar
 alltså, även om det är rätt stavat.
 
 Användning:
     python3 cpwer.py --ref facit.tsv --hyp kedja-a.tsv
-    python3 cpwer.py --ref facit/ --hyp kedja-a/ --jamfor kedja-b/ --experiment 8
+    python3 cpwer.py --ref facit/ --hyp nemotron/ --jamfor whisperx/
 
 Transkripten är TSV-filer med en replik per rad i tidsordning:
 talare<TAB>text. Med kataloger paras filerna ihop på filnamn.
 
 Mått per fil och totalt:
 - cpWER: fel med talarparning delat med antal ord i facit;
-- WER utan talare: samma ord i tidsordning, talarna bortsedda;
-- talarkostnad: cpWER − WER, alltså det som felaktig talartillskrivning kostar.
+- WER utan talare: alla repliker i filernas ordning, talarna bortsedda. Den
+  beror på hur repliker från olika talare är ordnade (till exempel inskott
+  under en annans tur) och är därför ingen undre gräns för cpWER; skillnaden
+  mellan dem kan bli negativ och redovisas inte som "talarkostnad".
 
-Med --jamfor sätts experiment 8:s band på kedja A (--hyp) mot kedja B:
-GRÖNT om A:s cpWER ≤ B:s, GRÅTT om A ligger högst 1 procentenhet över,
-RÖTT annars. Utredningens krav på grafikminne (≤ 5,0 GB på 6 GB-kortet)
-mäts med diarbank.py och asrbank.py och bedöms inte här.
+Med --jamfor sätts experiment 8:s band, och riktningen är fast:
+--hyp är Nemotron-kedjan (KB-Whisper + Nemotron BF16), --jamfor är
+whisperX-kedjan (KB-Whisper + community-1). GRÖNT om Nemotron-kedjans cpWER
+≤ whisperX-kedjans, GRÅTT om den ligger högst 1 procentenhet över, RÖTT
+annars. Det är bara cpWER-halvan av kriteriet: utredningens krav på
+grafikminne (≤ 5,0 GB för hela kedjan på 6 GB-kortet) saknar ännu verktyg,
+eftersom diarbank.py inte kör Nemotron. Bandet sparas därför som band_cpwer.
 
 Normaliseringen och ordfelen är desamma som i asrbank.py, och talarparningen
 använder diarjamfor.py:s ungerska metod. De tre filerna hör ihop.
 
-Avslutningskod: 0 = klart (GRÖNT eller GRÅTT med --jamfor), 2 = RÖTT, 1 = fel.
+Avslutningskod: 0 = klart (GRÖNT eller GRÅTT med --jamfor), 2 = RÖTT,
+1 = fel (även tomt facit och felaktiga argument).
 """
 import argparse
 import importlib.util
@@ -37,11 +44,14 @@ import os
 import sys
 
 GRONT, GRATT, ROTT = "GRÖNT", "GRÅTT", "RÖTT"
-HAR = os.path.dirname(os.path.abspath(__file__))
+HAR = os.path.dirname(os.path.realpath(__file__))   # realpath: fungerar även via symbolisk länk
 
 
 def _modul(namn):
-    spec = importlib.util.spec_from_file_location(namn, os.path.join(HAR, namn + ".py"))
+    sokvag = os.path.join(HAR, namn + ".py")
+    if not os.path.exists(sokvag):
+        sys.exit(f"fel: {namn}.py saknas bredvid cpwer.py; de tre verktygen ska ligga i samma mapp")
+    spec = importlib.util.spec_from_file_location(namn, sokvag)
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
@@ -107,10 +117,9 @@ def procent(fel, ord_):
 
 
 def band8(a, b):
-    if a is None or b is None:
-        return ROTT, "facit saknar ord"
+    """a = Nemotron-kedjans cpWER, b = whisperX-kedjans."""
     d = round(a - b, 2)
-    skal = f"cpWER A {a:.2f} % mot B {b:.2f} % ({d:+.2f} pe)"
+    skal = f"cpWER Nemotron-kedjan {a:.2f} % mot whisperX-kedjan {b:.2f} % ({d:+.2f} pe)"
     if d <= 0:
         return GRONT, skal
     return (GRATT if d <= 1.0 else ROTT), skal
@@ -140,9 +149,8 @@ class Tolk(argparse.ArgumentParser):
 def main(argv):
     ap = Tolk(prog="cpwer", description=__doc__.split("\n\n")[0])
     ap.add_argument("--ref", required=True, help="facit (fil eller katalog)")
-    ap.add_argument("--hyp", required=True, help="kedja A (fil eller katalog)")
-    ap.add_argument("--jamfor", help="kedja B; sätter experiment 8:s band")
-    ap.add_argument("--experiment", type=int, choices=[7, 8], default=8)
+    ap.add_argument("--hyp", required=True, help="Nemotron-kedjan, eller vilken kedja som helst utan --jamfor")
+    ap.add_argument("--jamfor", help="whisperX-kedjan; sätter experiment 8:s band (bara cpWER-halvan)")
     ap.add_argument("--ut", help="spara resultatet som JSON")
     args = ap.parse_args(argv[1:])
 
@@ -165,6 +173,8 @@ def main(argv):
                 summa["b"] += mb["fel"]
                 summa["b_utan"] += mb["fel_utan_talare"]
             rader.append(rad)
+        if not summa["ord"]:
+            raise ValueError("facit saknar ord")
         total = {"fil": "totalt", "ord": summa["ord"], "cpwer_a": procent(summa["a"], summa["ord"]),
                  "wer_utan_talare_a": procent(summa["a_utan"], summa["ord"])}
         utfall = None
@@ -175,23 +185,24 @@ def main(argv):
 
         def p(x):
             return "–" if x is None else f"{x:.2f}"
-        kol = "| Fil | Ord | cpWER A | WER A utan talare | Talarkostnad A |"
+        kol = "| Fil | Ord | cpWER | WER utan talare |"
         if args.jamfor:
-            kol += " cpWER B | WER B utan talare |"
+            kol = "| Fil | Ord | cpWER Nemotron | WER utan talare | cpWER whisperX | WER utan talare |"
         print(kol)
         print("|" + "---|" * (kol.count("|") - 1))
         for m in rader + [total]:
-            kost = (None if m["cpwer_a"] is None else round(m["cpwer_a"] - m["wer_utan_talare_a"], 3))
-            rad = f"| {m['fil']} | {m['ord']} | {p(m['cpwer_a'])} | {p(m['wer_utan_talare_a'])} | {p(kost)} |"
+            rad = f"| {m['fil']} | {m['ord']} | {p(m['cpwer_a'])} | {p(m['wer_utan_talare_a'])} |"
             if args.jamfor:
                 rad += f" {p(m.get('cpwer_b'))} | {p(m.get('wer_utan_talare_b'))} |"
             print(rad)
         if utfall:
-            print(f"\n**{utfall[0]}** (experiment 8, bara cpWER): {utfall[1]}")
+            print(f"\n**{utfall[0]}** (experiment 8, bara cpWER-halvan; VRAM-halvan OMÄTT): {utfall[1]}")
         if args.ut:
             with open(args.ut, "w", encoding="utf-8") as f:
-                json.dump({"experiment": args.experiment, "filer": rader, "totalt": total,
-                           "band": utfall[0] if utfall else None, "skal": utfall[1] if utfall else None},
+                json.dump({"experiment": 8 if utfall else None, "filer": rader, "totalt": total,
+                           "band_cpwer": utfall[0] if utfall else None,
+                           "delbedomning": "bara cpWER; VRAM-kravet saknar verktyg" if utfall else None,
+                           "skal": utfall[1] if utfall else None},
                           f, ensure_ascii=False, indent=1)
     except (OSError, ValueError) as e:
         print(f"fel: {e}", file=sys.stderr)

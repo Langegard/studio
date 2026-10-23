@@ -170,6 +170,10 @@ class Kommandorad(unittest.TestCase):
         self.assertEqual(j["totalt"]["band"], dj.GRONT)
         self.assertIn("DER-skillnad mot facit", text)
 
+    def test_tyst_mot_tyst_ar_overensstammelse(self):
+        tom = skriv(self.d, "t.rttm", [])
+        self.assertEqual(kor("--ref", tom, "--hyp", tom)[0], 0)
+
     def test_rott_ger_kod_2(self):
         ref = skriv(self.d, "r.rttm", [(0, 10, "A")])
         hyp = skriv(self.d, "h.rttm", [(0, 5, "A")])
