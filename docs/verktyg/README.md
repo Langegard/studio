@@ -104,7 +104,7 @@ Talarna matchas optimalt med den ungerska metoden. Den är provad mot uttömmand
 
 **Avslutningskod:** `0` vid GRÖNT eller GRÅTT, `2` vid RÖTT, `1` vid fel. Verktyget läser bara tider och etiketter, aldrig ljud eller text.
 
-Prov: 16 st i `prov/test_diarjamfor.py`. De kräver inga beroenden.
+Prov: 17 st i `prov/test_diarjamfor.py`. De kräver inga beroenden.
 
 ## asrbank
 
@@ -129,4 +129,4 @@ python3 asrbank.py --manifest m.tsv --varianter large:float16:cuda,large:int8:cu
 
 Bänken sparar inga transkript. **Läge:** provad mot en attrapp, **inte körd med riktiga modeller än (OMÄTT)**. API-anropen följer faster-whisper 1.2.1.
 
-Prov: 18 st i `prov/test_asrbank.py`. De kräver inga beroenden.
+Prov: 16 st i `prov/test_asrbank.py`. De kräver inga beroenden.
