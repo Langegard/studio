@@ -95,7 +95,7 @@ Verktyget är oberoende av körmotor. Det enda det behöver är två RTTM-filer,
 
 Talarna matchas optimalt med den ungerska metoden. Den är provad mot uttömmande sökning i 200 slumpfall.
 
-**Korskontroll:** utan självöverlapp ger verktyget samma DER som pyannote.metrics 3.2.1. Största skillnaden över 30 slumpade femminutersmöten var 0,0005 procentenheter. Självöverlapp hos samma talare räknas en gång, som i NIST:s md-eval. Ett möte på 15 minuter med fem talare tar under en sekund.
+**Korskontroll:** utan självöverlapp ger verktyget samma DER som pyannote.metrics 3.2.1 och 4.2.0 (den version pyannote.audio 4.0.7 drar in). Största skillnaden över 30 slumpade femminutersmöten var 0,0005 procentenheter. Självöverlapp hos samma talare räknas en gång, som i NIST:s md-eval. Ett möte på 15 minuter med fem talare tar under en sekund.
 
 **Band (utredningens avsnitt 7):**
 - **Experiment 1:** GRÖNT vid DER ≤ 2 % och turer inom ±1 %. RÖTT vid DER > 6 % eller turer utanför ±3 %.

@@ -23,7 +23,7 @@ Med kataloger paras filerna ihop på filnamn. Mått per fil och totalt:
 
 Överlappande segment med samma talare räknas en gång, som i NIST:s md-eval.
 pyannote.metrics räknar dem två gånger. Utan sådan självöverlapp ger verktyget
-samma DER som pyannote.metrics 3.2.1 (collar 0, överlapp inräknat): största
+samma DER som pyannote.metrics 3.2.1 och 4.2.0 (collar 0, överlapp inräknat): största
 skillnaden över 30 slumpade femminutersmöten var 0,0005 procentenheter.
 
 Band (utredningens tröskelvärden, avsnitt 7):
