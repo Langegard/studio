@@ -104,7 +104,7 @@ Talarna matchas optimalt med den ungerska metoden. Den är provad mot uttömmand
 
 **Avslutningskod:** `0` vid GRÖNT eller GRÅTT, `2` vid RÖTT, `1` vid fel. Verktyget läser bara tider och etiketter, aldrig ljud eller text.
 
-Prov: 17 st i `prov/test_diarjamfor.py`. De kräver inga beroenden.
+Prov: 16 st i `prov/test_diarjamfor.py`. De kräver inga beroenden.
 
 ## asrbank
 
