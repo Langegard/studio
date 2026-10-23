@@ -71,6 +71,11 @@ class Matt(unittest.TestCase):
         self.assertEqual(m["der"], 0.0)
         self.assertAlmostEqual(m["tal_s"], 12.0, places=2)
 
+    def test_turer_raknas_pa_rutnatet(self):
+        m = dj.jamfor([(0, 5, "A"), (5, 10, "A"), (10, 12, "B")], [(0, 10, "A"), (10, 12, "B")])
+        self.assertEqual((m["turer_ref"], m["rader_ref"]), (2, 3))
+        self.assertEqual(dj.turavvikelse(m), 0.0)
+
     def test_turavvikelse(self):
         ref = [(i, i + 1, "AB"[i % 2]) for i in range(100)]
         hyp = ref[:93]
@@ -133,14 +138,37 @@ class Kommandorad(unittest.TestCase):
         ut = os.path.join(self.d, "r.json")
         kod, text, _ = kor("--ref", os.path.join(self.d, "ref"), "--hyp", os.path.join(self.d, "hyp"),
                            "--experiment", "2", "--ut", ut)
-        self.assertEqual(kod, 0)
+        self.assertEqual(kod, 2)                              # en fil är RÖTT
         with open(ut, encoding="utf-8") as f:
             j = json.load(f)
         self.assertEqual(j["totalt"]["turer_ref"], 200)
         self.assertEqual(j["totalt"]["turavvikelse"], -1.5)
         self.assertAlmostEqual(j["totalt"]["missat"], 1.5, places=2)
         self.assertEqual(j["totalt"]["band"], dj.GRATT)       # DER 1,5 % > 0,5 men ≤ 1,5
+        self.assertEqual([m["band"] for m in j["filer"]], [dj.GRONT, dj.ROTT])
+        self.assertEqual(j["totalt"]["storsta_turavvikelse"], 3.0)
         self.assertIn("| totalt |", text)
+
+    def test_felaktiga_argument_ger_kod_1(self):
+        self.assertEqual(kor("--ref", "a", "--hyp", "b", "--experiment", "4")[0], 1)
+
+    def test_bom_tappar_inte_forsta_raden(self):
+        ref = os.path.join(self.d, "r.rttm")
+        with open(ref, "w", encoding="utf-8-sig") as f:
+            f.write(rttm([(0, 2, "A"), (2, 4, "B")]))
+        self.assertEqual(len(dj.segment_for(ref)), 2)
+
+    def test_facit_mater_der_skillnaden(self):
+        fac = skriv(self.d, "f.rttm", [(0, 10, "A"), (10, 20, "B")])
+        ref = skriv(self.d, "r.rttm", [(0, 10, "A"), (10, 19, "B")])      # 5 % fel mot facit
+        hyp = skriv(self.d, "h.rttm", [(0, 10, "A"), (10, 18.9, "B")])    # 5,5 % fel mot facit
+        ut = os.path.join(self.d, "j.json")
+        kod, text, _ = kor("--ref", ref, "--hyp", hyp, "--facit", fac, "--ut", ut)
+        with open(ut, encoding="utf-8") as f:
+            j = json.load(f)
+        self.assertAlmostEqual(j["totalt"]["der_matt"], 0.5, places=2)
+        self.assertEqual(j["totalt"]["band"], dj.GRONT)
+        self.assertIn("DER-skillnad mot facit", text)
 
     def test_rott_ger_kod_2(self):
         ref = skriv(self.d, "r.rttm", [(0, 10, "A")])

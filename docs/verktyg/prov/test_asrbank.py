@@ -27,6 +27,9 @@ class Text(unittest.TestCase):
     def test_normalisering_behaller_svenska_bokstaver(self):
         self.assertEqual(ab.normalisera("Hej, Åsa!  Är   ÖL gott?"), "hej åsa är öl gott")
 
+    def test_bindestreck_och_kolon_inne_i_ord_slas_ihop(self):
+        self.assertEqual(ab.normalisera("E-post från USA:s ambassad, 50 %."), "epost från usas ambassad 50")
+
     def test_normalisering_tar_bort_tankstreck_och_citattecken(self):
         self.assertEqual(ab.normalisera("»Ja« – sa hon."), "ja sa hon")
 
@@ -50,20 +53,27 @@ class Varianter(unittest.TestCase):
         self.assertEqual(ab.tolka_variant("org/modell:float16:cuda")[0], "org/modell")
 
     def test_trasiga_varianter(self):
-        for fel in ("large:int8", "large::cuda", "large:int8:tpu"):
+        for fel in ("large:int8", "large::cuda", "large:int8:tpu", "large-v3:float16:cuda"):
             with self.assertRaises(ValueError):
                 ab.tolka_variant(fel)
 
 
 class Band(unittest.TestCase):
-    def r(self, modell, prec, wer=None, rtf=None):
-        return {"modell": modell, "precision": prec, "wer": wer, "rtf": rtf}
+    def r(self, modell, prec, wer=None, rtf=None, enhet="cuda"):
+        return {"modell": modell, "precision": prec, "wer": wer, "rtf": rtf, "enhet": enhet}
 
     def test_experiment_5(self):
         f = self.r("KBLab/kb-whisper-large", "float16", wer=5.4)
         for int8_wer, vantat in ((5.7, ab.GRONT), (5.71, ab.GRATT), (6.4, ab.GRATT), (6.41, ab.ROTT)):
             i = self.r("KBLab/kb-whisper-large", "int8", wer=int8_wer)
             self.assertEqual(ab.band(5, [f, i])[0], vantat, int8_wer)
+
+    def test_experiment_5_kraver_samma_modell_och_enhet(self):
+        f = self.r("KBLab/kb-whisper-large", "float16", wer=5.4)
+        annan = self.r("KBLab/kb-whisper-medium", "int8", wer=5.5)
+        cpu = self.r("KBLab/kb-whisper-large", "int8", wer=5.5, enhet="cpu")
+        self.assertEqual(ab.band(5, [f, annan])[0], ab.OMATT)
+        self.assertEqual(ab.band(5, [f, cpu])[0], ab.OMATT)
 
     def test_experiment_5_utan_int8_ar_omatt(self):
         self.assertEqual(ab.band(5, [self.r("x", "float16", wer=5.0)])[0], ab.OMATT)
@@ -103,12 +113,16 @@ class Torrkorning(unittest.TestCase):
         self.assertEqual(j["band"], ab.GRONT)
         self.assertEqual([r["precision"] for r in j["resultat"]], ["float16", "int8"])
         self.assertNotIn("text", json.dumps(j))            # inga transkript sparas
+        self.assertIn("python", j["miljo"])
         self.assertIn("**GRÖNT**", text)
 
     def test_experiment_6(self):
         kod, text, _ = kor("--attrapp", "--experiment", "6")
         self.assertEqual(kod, 0)
         self.assertIn("**GRÅTT**: medium RTF 0.70", text)
+
+    def test_felaktiga_argument_ger_kod_1(self):
+        self.assertEqual(kor("--experiment", "9")[0], 1)
 
     def test_utan_manifest_ar_fel(self):
         self.assertEqual(kor()[0], 1)

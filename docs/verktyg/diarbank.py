@@ -15,7 +15,8 @@ Körningar (utredningens beteckningar):
     B    baslinje: community-1 med standardvärden, ljud via filsökväg
     R1   ljudet förladdat i minnet ({"waveform", "sample_rate"})
     R2   TF32 påslaget (pyannotes fix_reproducibility slår annars av det)
-    R3   segmentation_batch_size och embedding_batch_size 32, 64, 128
+    R3   segmentation_batch_size och embedding_batch_size 64 och 128
+         (community-1 kör redan 32, så 32 är baslinjen)
     R4a  segmentation_step 0,1 → 0,2
     R4b  segmentation_step 0,1 → 0,4
     R7   num_speakers känt (bara med --talare)
@@ -23,13 +24,18 @@ Körningar (utredningens beteckningar):
 R5 (fp16 i embedding), R6 (annan klustring) och R9–R11 (andra motorer) kräver
 kodändringar eller andra paket och ingår inte; de rapporteras som OMÄTT.
 
+DER-banden (R2, R4, R8) bedöms bara med --ref: utredningen mäter DER-skillnad
+mot en referens. Utan referens redovisas självkonsistens (DER mot baslinjens
+utdata) i en egen kolumn, och de banden blir OMÄTT. Grafikminnet anges i GiB.
+
 Mät bara på grönt ljud: offentliga testklipp (t.ex. AMI ES2004a, CC BY 4.0)
 eller påhittade inspelningar. Bänken sparar inga transkript, bara tider,
 minne och diariseringsfel. Token för Hugging Face läses ur en miljövariabel
 och skrivs aldrig ut.
 
 Avslutningskod: 0 = klart, 2 = rimlighetskontrollen föll (pipelinen ligger
-inte på GPU:n), 1 = fel.
+inte på GPU:n), 1 = fel. Fel i en enskild variant stoppar inte bänken; den
+varianten blir OMÄTT och resultatet sparas efter varje variant.
 """
 import argparse
 import json
@@ -38,6 +44,7 @@ import statistics
 import sys
 import threading
 import time
+import wave
 
 GRONT, GRATT, ROTT, OMATT = "GRÖNT", "GRÅTT", "RÖTT", "OMÄTT"
 
@@ -46,7 +53,6 @@ VARIANTER = [
     ("B", "baslinje", {}),
     ("R1", "ljud i minnet", {"minne": True}),
     ("R2", "TF32 på", {"tf32": True}),
-    ("R3-32", "batch 32", {"batch": 32}),
     ("R3-64", "batch 64", {"batch": 64}),
     ("R3-128", "batch 128", {"batch": 128}),
     ("R4a", "segmentation_step 0,2", {"steg": 0.2}),
@@ -74,23 +80,27 @@ def rtfx(ljud_s, vagg_s):
 def stegtider(handelser, slut):
     """Tid per steg ur hook-anropen.
 
-    handelser: lista av (tidpunkt, stegnamn) i anropsordning. I pyannote 4.0.7
-    anropas hook redan när segmenteringen och embeddingarna börjar (completed=0),
-    så ett steg räknas från sitt första anrop till nästa stegs första anrop (eller
-    till slut). Klustringen har ingen egen hook; den ligger mellan embeddingstegets
-    sista anrop och nästa steg och redovisas som "klustring".
+    handelser: lista av (tidpunkt, stegnamn) i anropsordning, tid räknad från
+    anropets start. I pyannote 4.0.7 anropas hook redan när segmenteringen och
+    embeddingarna börjar (completed=0). Ett steg räknas från sitt första anrop
+    till nästa stegs första anrop; embeddings dock bara till sitt sista anrop,
+    och tiden därefter fram till nästa steg (VBx och rekonstruktion) redovisas
+    som "klustring". Tiden före första anropet (förberedelse och avkodning av
+    ljudet) redovisas som "inlasning".
     """
     forsta, sista = [], {}
     for t, steg in handelser:
         if steg not in sista:
             forsta.append((t, steg))
         sista[steg] = t
-    ut = {}
+    ut = {"inlasning": round(forsta[0][0], 3)} if forsta else {}
     for i, (t, steg) in enumerate(forsta):
         nasta = forsta[i + 1][0] if i + 1 < len(forsta) else slut
-        ut[steg] = round(max(0.0, nasta - t), 3)
         if steg == "embeddings":
+            ut[steg] = round(max(0.0, sista[steg] - t), 3)
             ut["klustring"] = round(max(0.0, nasta - sista[steg]), 3)
+        else:
+            ut[steg] = round(max(0.0, nasta - t), 3)
     return ut
 
 
@@ -108,6 +118,8 @@ def band(kod, mat, bas, cfg):
 
     if mat.get("oom"):
         return ROTT, "slut på grafikminne"
+    if mat.get("fel"):
+        return OMATT, "fel: " + mat["fel"]
     if kod == "B":
         varm, kmv = mat.get("rtfx_varm"), mat.get("kall_minus_varm")
         if varm is None:
@@ -129,22 +141,22 @@ def band(kod, mat, bas, cfg):
         return (GRATT if s >= -0.10 else ROTT), f"{s:+.0%}"
     if kod == "R2":
         if not har(d):
-            return OMATT, f"{s:+.0%}, diariseringsfel omätt"
+            return OMATT, f"{s:+.0%}, DER-Δ kräver --ref"
         if s >= 0.25 and d <= 0.3:
             return GRONT, f"{s:+.0%}, DER-Δ {d:+.2f}"
         if s < 0.05 or d > 0.3:
             return ROTT, f"{s:+.0%}, DER-Δ {d:+.2f}"
         return GRATT, f"{s:+.0%}, DER-Δ {d:+.2f}"
     if kod.startswith("R3"):
-        res = mat.get("vram_reserverat_gb")
+        res = mat.get("vram_reserverat_gib")
         if s < 0.05:
             return ROTT, f"{s:+.0%}"
-        if s >= 0.20 and res is not None and res < cfg["vram_tak_gb"]:
-            return GRONT, f"{s:+.0%}, reserverat {res:.1f} GB"
-        return GRATT, f"{s:+.0%}, reserverat {fmt(res, ' GB')}"
+        if s >= 0.20 and res is not None and res < cfg["vram_tak_gib"]:
+            return GRONT, f"{s:+.0%}, reserverat {res:.1f} GiB"
+        return GRATT, f"{s:+.0%}, reserverat {fmt(res, ' GiB')}"
     if kod in ("R4a", "R4b"):
         if not har(d):
-            return OMATT, f"{f:.2f}×, diariseringsfel omätt"
+            return OMATT, f"{f:.2f}×, DER-Δ kräver --ref"
         gron, rod, dg, dr = ((1.6, 1.2, 0.5, 1.5) if kod == "R4a"
                              else (2.5, 1.5, 1.0, 3.0))
         fel_talare = kod == "R4b" and mat.get("talarfel")
@@ -206,7 +218,7 @@ class Attrapp:
     baslinjen) så att alla band kan provas.
     """
     namn = "attrapp"
-    FAKTOR = {"minne": 1.05, "tf32": 1.3, ("batch", 32): 1.25, ("batch", 64): 1.3,
+    FAKTOR = {"minne": 1.05, "tf32": 1.3, ("batch", 64): 1.3,
               ("steg", 0.2): 1.8, ("steg", 0.4): 2.8, "talare": 1.1}
     DER_PP = {"tf32": 0.1, ("steg", 0.2): 0.3, ("steg", 0.4): 0.8}
 
@@ -235,13 +247,13 @@ class Attrapp:
         return {"vagg": vagg, "hyp": {"der_pp": d, "talare": 4}, "oom": False,
                 "handelser": [(0.0, "segmentation"), (vagg * 0.4, "embeddings"),
                               (vagg * 0.9, "discrete_diarization")],
-                "vram_alloc_gb": 3.1, "vram_reserverat_gb": 4.0 + (inst.get("batch") or 0) / 32,
+                "vram_alloc_gib": 3.1, "vram_reserverat_gib": 4.0 + (inst.get("batch") or 0) / 32,
                 "tf32_i_hook": bool(inst.get("tf32")), "enhet_i_hook": "cuda:0"}
 
     def der(self, ref, hyp, collar):
         if ref.get("referens"):                   # mot en riktig referens: baslinjen har 5 pe fel
             return max(0.0, 5.0 + hyp["der_pp"] - (1.0 if collar else 0.0)) / 100
-        return abs(hyp["der_pp"] - ref["der_pp"]) / 100   # mot baslinjens utdata
+        return (abs(hyp["der_pp"] - ref["der_pp"]) + 0.7) / 100   # självkonsistens ≠ Δ mot referens
 
     def talare(self, ann):
         return ann["talare"]
@@ -284,8 +296,12 @@ class Pyannote:
     def ljudlangd(self, kalla):
         if isinstance(kalla, dict):
             return kalla["waveform"].shape[-1] / kalla["sample_rate"]
-        vag, sr = self._ladda(kalla)
-        return vag.shape[-1] / sr
+        try:                                     # WAV: läs huvudet, avkoda inte (kallstarten ska vara kall)
+            with wave.open(kalla, "rb") as w:
+                return w.getnframes() / w.getframerate()
+        except (wave.Error, EOFError):
+            vag, sr = self._ladda(kalla)
+            return vag.shape[-1] / sr
 
     def _ladda(self, sokvag):
         if sokvag not in self._minne:
@@ -344,16 +360,24 @@ class Pyannote:
             if cuda:
                 torch.cuda.synchronize()
             t1 = time.perf_counter()
-        except torch.cuda.OutOfMemoryError:
-            torch.cuda.empty_cache()
-            return {"oom": True}
+        except (torch.cuda.OutOfMemoryError, MemoryError) as e:
+            # pyannotes segmentering gör om CUDA:s minnesfel till MemoryError (inference.py).
+            if cuda:
+                torch.cuda.empty_cache()
+            return {"oom": True, "fel": type(e).__name__}
+        except RuntimeError as e:
+            if "out of memory" in str(e).lower() or "CUDNN_STATUS_ALLOC_FAILED" in str(e):
+                if cuda:
+                    torch.cuda.empty_cache()
+                return {"oom": True, "fel": "RuntimeError (minne)"}
+            raise
         finally:
             self._stall_in({})
         ann = getattr(ut, "speaker_diarization", ut)
         return {"vagg": t1 - t0, "hyp": ann, "oom": False,
                 "handelser": [(t - t0, s) for t, s in handelser],
-                "vram_alloc_gb": torch.cuda.max_memory_allocated() / 1e9 if cuda else None,
-                "vram_reserverat_gb": torch.cuda.max_memory_reserved() / 1e9 if cuda else None,
+                "vram_alloc_gib": torch.cuda.max_memory_allocated() / 2**30 if cuda else None,
+                "vram_reserverat_gib": torch.cuda.max_memory_reserved() / 2**30 if cuda else None,
                 "tf32_i_hook": syn.get("tf32"), "enhet_i_hook": syn.get("enhet")}
 
     def der(self, ref, hyp, collar):
@@ -414,14 +438,16 @@ def mat_variant(motor, kalla, inst, args, ljud_s, ref, bas_hyp, kall=False):
     """
     def kor():
         return motor.kor(kalla, inst, args.talare)
-    if not kall and kor().get("oom"):
-        return {"inst": inst, "oom": True}, None
+    if not kall:
+        forsta = kor()
+        if forsta.get("oom"):
+            return {"inst": inst, "oom": True, "fel": forsta.get("fel")}, None
     tider, sista, cpu = [], None, []
     for _ in range(args.upprepa + (1 if kall else 0)):
         with Cpu() as c:
             r = kor()
         if r.get("oom"):
-            return {"inst": inst, "oom": True}, None
+            return {"inst": inst, "oom": True, "fel": r.get("fel")}, None
         cpu.append(c.medel)
         tider.append(r["vagg"])
         sista = r
@@ -435,8 +461,8 @@ def mat_variant(motor, kalla, inst, args, ljud_s, ref, bas_hyp, kall=False):
     mat.update({
         "vagg_varm": round(varm, 3), "rtfx_varm": rtfx(ljud_s, varm),
         "stegtider": stegtider(sista["handelser"], sista["vagg"]),
-        "vram_alloc_gb": sista.get("vram_alloc_gb"),
-        "vram_reserverat_gb": sista.get("vram_reserverat_gb"),
+        "vram_alloc_gib": sista.get("vram_alloc_gib"),
+        "vram_reserverat_gib": sista.get("vram_reserverat_gib"),
         "cpu_medel": round(statistics.mean(cpu), 1) if cpu else None,
         "tf32_i_hook": sista.get("tf32_i_hook"), "enhet_i_hook": sista.get("enhet_i_hook"),
         "talare": motor.talare(sista["hyp"]),
@@ -449,18 +475,18 @@ def mat_variant(motor, kalla, inst, args, ljud_s, ref, bas_hyp, kall=False):
         mat["talare_ref"] = motor.talare(ref)
     elif bas_hyp is not None:
         mat["der_sjalv_c0"] = motor.der(bas_hyp, sista["hyp"], 0.0)
-    if bas_hyp is not None:
-        # En variabel i taget: felet räknas bara om ändringen själv flyttade talarantalet.
+    if ref is not None:
+        mat["talarfel"] = mat["talare"] != mat["talare_ref"]
+    elif bas_hyp is not None:
+        # Utan referens: räkna bara om ändringen själv flyttade talarantalet.
         mat["talarfel"] = mat["talare"] != motor.talare(bas_hyp)
     return mat, sista["hyp"]
 
 
 def delta(mat, bas):
-    """DER-Δ i procentenheter: mot referensen om den finns, annars mot baslinjens utdata."""
+    """DER-Δ i procentenheter mot referensen (utredningens 4.4). Utan referens: None."""
     if mat.get("der_ref_c0") is not None and bas.get("der_ref_c0") is not None:
         return round((mat["der_ref_c0"] - bas["der_ref_c0"]) * 100, 3)
-    if mat.get("der_sjalv_c0") is not None:
-        return round(mat["der_sjalv_c0"] * 100, 3)
     return None
 
 
@@ -474,19 +500,21 @@ def spara_rttm(motor, args, kod, hyp):
 
 
 def tabell(resultat):
-    rader = ["| Körning | Ändring | RTFx varm | Mot B | DER-Δ (pe) | VRAM res. | Band | Skäl |",
-             "|---|---|---|---|---|---|---|---|"]
+    rader = ["| Körning | Ändring | RTFx varm | Mot B | DER-Δ mot ref (pe) | Själv-DER (pe) | VRAM res. | Band | Skäl |",
+             "|---|---|---|---|---|---|---|---|---|"]
     bas = resultat.get("B", {})
     for kod, r in resultat.items():
         s = andel(r.get("rtfx_varm"), bas.get("rtfx_varm")) if kod != "B" else None
-        rader.append("| {} | {} | {} | {} | {} | {} | {} | {} |".format(
+        sjalv = r.get("der_sjalv_c0")
+        rader.append("| {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
             kod, r.get("beskrivning", ""),
             OMATT if r.get("rtfx_varm") is None else f"{r['rtfx_varm']:.2f}×",
             "–" if s is None else f"{s:+.0%}",
-            fmt(r.get("der_delta_pp")), fmt(r.get("vram_reserverat_gb"), " GB"),
+            fmt(r.get("der_delta_pp")), "–" if sjalv is None else f"{sjalv * 100:.2f}",
+            fmt(r.get("vram_reserverat_gib"), " GiB"),
             r.get("band"), r.get("skal", "")))
     for kod, skal in EJ_I_BANKEN.items():
-        rader.append(f"| {kod} | – | – | – | – | – | {OMATT} | ingår inte: {skal} |")
+        rader.append(f"| {kod} | – | – | – | – | – | – | {OMATT} | ingår inte: {skal} |")
     return "\n".join(rader)
 
 
@@ -499,7 +527,7 @@ def main(argv):
     ap.add_argument("--modell", default="pyannote/speaker-diarization-community-1")
     ap.add_argument("--token-variabel", default="HF_TOKEN")
     ap.add_argument("--enhet", default="cuda")
-    ap.add_argument("--vram-tak-gb", type=float, default=9.0)
+    ap.add_argument("--vram-tak-gib", type=float, default=9.0, help="R3:s gräns för reserverat minne (GiB)")
     ap.add_argument("--korningar", help="kommaseparerat urval, t.ex. B,R2,R4b")
     ap.add_argument("--ingen-kombination", action="store_true", help="hoppa över R8")
     ap.add_argument("--ut", help="spara resultatet som JSON")
@@ -543,41 +571,53 @@ def main(argv):
               "inte på GPU:n. Felsök torch-bygget och drivrutinen först.", file=sys.stderr)
         return 2
 
-    cfg = {"vram_tak_gb": args.vram_tak_gb}
+    cfg = {"vram_tak_gib": args.vram_tak_gib}
     resultat, bas_hyp = {}, None
-    for kod, besk, inst in valda:
-        print(f"… {kod} ({besk})", file=sys.stderr, flush=True)
-        mat, hyp = mat_variant(motor, kalla, inst, args, ljud_s, ref, bas_hyp, kall=(kod == "B"))
-        if kod == "B":
-            bas_hyp = hyp
-        spara_rttm(motor, args, kod, hyp)
-        resultat[kod] = {"beskrivning": besk, **mat}
 
     def satt_band():
         bas = resultat.get("B", {})
         for kod, r in resultat.items():
-            r["der_delta_pp"] = 0.0 if kod == "B" else delta(r, bas)
+            r["der_delta_pp"] = (0.0 if ref is not None else None) if kod == "B" else delta(r, bas)
             r["band"], r["skal"] = band(kod, r, bas, cfg)
 
-    satt_band()
-    inst = {} if args.ingen_kombination else kombination(resultat)
-    if inst:
-        print("… R8 (kombination)", file=sys.stderr, flush=True)
-        mat, hyp = mat_variant(motor, kalla, inst, args, ljud_s, ref, bas_hyp)
-        spara_rttm(motor, args, "R8", hyp)
-        resultat["R8"] = {"beskrivning": "kombination: " + ", ".join(
-            f"{k}={v}" for k, v in sorted(inst.items())), **mat}
+    def spara():
+        """Skriv JSON efter varje variant, så att ett avbrott inte tar allt."""
+        if not args.ut:
+            return
+        with open(args.ut, "w", encoding="utf-8") as f:
+            json.dump({"motor": motor.namn, "ljud_s": ljud_s, "upprepa": args.upprepa,
+                       "referens": bool(ref), "resultat": resultat,
+                       "ej_i_banken": EJ_I_BANKEN}, f, ensure_ascii=False, indent=1)
+
+    def kor_en(kod, besk, inst, kall=False):
+        print(f"… {kod} ({besk})", file=sys.stderr, flush=True)
+        try:
+            mat, hyp = mat_variant(motor, kalla, inst, args, ljud_s, ref, bas_hyp, kall=kall)
+            spara_rttm(motor, args, kod, hyp)
+        except Exception as e:                   # noqa: BLE001 — varianten blir OMÄTT, bänken fortsätter
+            print(f"   {kod} föll: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+            mat, hyp = {"inst": inst, "oom": False, "fel": f"{type(e).__name__}: {e}"[:200]}, None
+        resultat[kod] = {"beskrivning": besk, **mat}
         satt_band()
+        spara()
+        return hyp
+
+    try:
+        for kod, besk, inst in valda:
+            hyp = kor_en(kod, besk, inst, kall=(kod == "B"))
+            if kod == "B":
+                bas_hyp = hyp
+        inst = {} if args.ingen_kombination else kombination(resultat)
+        if inst:
+            kor_en("R8", "kombination: " + ", ".join(f"{k}={v}" for k, v in sorted(inst.items())), inst)
+    except OSError as e:
+        print(f"fel: kunde inte spara {args.ut}: {e}", file=sys.stderr)
+        return 1
 
     print(tabell(resultat))
     if tolkningsregel(resultat):
         print("\nB är rött och R1–R7 är alla gråa: GPU:n är inte flaskhalsen. Felsök miljön "
               "(torch-bygge, .to(cuda), drivrutin) innan fler parametrar provas.")
-    if args.ut:
-        with open(args.ut, "w", encoding="utf-8") as f:
-            json.dump({"motor": motor.namn, "ljud_s": ljud_s, "upprepa": args.upprepa,
-                       "referens": bool(ref), "resultat": resultat,
-                       "ej_i_banken": EJ_I_BANKEN}, f, ensure_ascii=False, indent=1)
     return 0
 
 

@@ -60,7 +60,11 @@ Den mäter:
 - antal talare;
 - **DER** med `pyannote.metrics`, collar 0 och ±0,25 s (pyannotes `collar=0.5`).
 
-Utan `--ref` mäts DER mot baslinjens egen utdata (självkonsistens).
+**DER-banden (R2, R4, R8) bedöms bara med `--ref`.** Utredningen mäter DER-skillnaden mot en referens. Utan `--ref` redovisas självkonsistensen, alltså DER mot baslinjens egen utdata, i en egen kolumn, och DER-banden blir OMÄTT. **Fel antal talare i R4b** jämförs med referensen när den finns, annars med baslinjen.
+
+**R3** provar batch 64 och 128. community-1 kör redan 32, så 32 är baslinjen. Grafikminnet anges i GiB, och gränsen för R3 är `--vram-tak-gib 9`.
+
+**Stegtider:** förutom stegen redovisas inläsningen (tiden före första hook-anropet) och klustringen (tiden efter sista embeddings-anropet) för sig.
 
 **R2 (TF32)** kopplar in sig efter pyannotes `fix_reproducibility()`, som annars stänger av TF32 vid varje anrop. **R4 (steget)** skriver direkt till segmenteringens `step` i sekunder. Pipelinens attribut läses bara när den skapas, så det räcker inte att ändra det. **R8** kombinerar alla gröna varianter. Från R3 och R4 tas bara den snabbaste. R5, R6 och R9–R11 ingår inte och redovisas som OMÄTT.
 
@@ -74,6 +78,8 @@ Utan `--ref` mäts DER mot baslinjens egen utdata (självkonsistens).
 - `0`: klart.
 - `2`: rimlighetskontrollen föll, eftersom segmenteringsmodellen inte ligger på GPU:n. Felsök då torch-bygget och drivrutinen innan något annat mäts.
 - `1`: fel.
+
+Faller en enskild variant, till exempel av minnesbrist (också pyannotes `MemoryError` i segmenteringen) eller av något annat fel, blir den OMÄTT eller RÖTT och bänken fortsätter. JSON-filen skrivs efter varje variant. Ljudlängden läses ur WAV-huvudet, så baslinjens kallstart blir verkligt kall.
 
 **Läge:** syntaxkontrollerad, och provad mot en attrapp som återger referensmätningens takt. Attrappen täcker banden, kombinationen, urvalet och DER mot referens och mot baslinjen. **Bänken är inte körd på en GPU än. Dess första riktiga mätning är OMÄTT** tills någon har gjort den. Kodvägen mot pyannote följer källan till 4.0.7.
 
@@ -89,9 +95,11 @@ python3 diarjamfor.py --ref bf16/ --hyp q8/ --experiment 2 --ut resultat.json   
 Verktyget är oberoende av körmotor. Det enda det behöver är två RTTM-filer, till exempel från audio.cpp, NeMo, parakeet.cpp eller pyannote.
 
 **Mått, per fil och viktat totalt:**
-- **turer:** antal segment och avvikelsen i procent;
+- **turer:** sammanhängande tal av en talare på 10 ms-rutnätet, där segment med samma talare som överlappar eller möts slås ihop, och avvikelsen i procent. Antalet RTTM-rader redovisas för sig;
 - **DER:** med referensen som facit, collar 0 och överlapp inräknat, uppdelad på missat, falsklarm och förväxling;
-- **etikettskillnad:** andel 10 ms-ramar där etiketterna skiljer sig utan matchning. Måttet är bara meningsfullt när båda körningarna kommer från samma modell.
+- **etikettskillnad:** andel av tidslinjens 10 ms-ramar där någon etiketts aktivitet skiljer sig, utan matchning (utredningens "same-label-aktivitetsskillnad"). Måttet är bara meningsfullt när båda körningarna kommer från samma modell.
+
+**Med `--facit`** (en handmärkt referens eller en forced-alignment-referens) bedöms banden på DER-skillnaden |DER(hyp, facit) − DER(ref, facit)|. Det är den storhet som de publicerade paritetsmätningarna redovisar. Utan facit bedöms banden på DER med `--ref` som facit. Utredningen har inte avgjort vilket av måtten den avser, så tabellen anger vilket som användes.
 
 Talarna matchas optimalt med den ungerska metoden. Den är provad mot uttömmande sökning i 200 slumpfall.
 
@@ -102,9 +110,9 @@ Talarna matchas optimalt med den ungerska metoden. Den är provad mot uttömmand
 - **Experiment 2 och 3:** GRÖNT vid turer inom ±2 % och DER ≤ 0,5 %. RÖTT vid turer utanför ±6 % eller DER > 1,5 %.
 - Däremellan GRÅTT.
 
-**Avslutningskod:** `0` vid GRÖNT eller GRÅTT, `2` vid RÖTT, `1` vid fel. Verktyget läser bara tider och etiketter, aldrig ljud eller text.
+**Avslutningskod:** `0` vid GRÖNT eller GRÅTT, `2` om totalen eller någon enskild fil är RÖTT, `1` vid fel, även felaktiga argument. Totalen räknas på summerade ramar, och den största avvikelsen i turer per fil redovisas. Filer med BOM läses rätt. Verktyget läser bara tider och etiketter, aldrig ljud eller text.
 
-Prov: 16 st i `prov/test_diarjamfor.py`. De kräver inga beroenden.
+Prov: 20 st i `prov/test_diarjamfor.py`. De kräver inga beroenden.
 
 ## asrbank
 
@@ -112,21 +120,34 @@ Prov: 16 st i `prov/test_diarjamfor.py`. De kräver inga beroenden.
 pip install faster-whisper pynvml                      # pynvml bara för grafikminnet
 python3 asrbank.py --manifest fleurs-sv-test.tsv --experiment 5            # large fp16 mot int8 på GPU
 python3 asrbank.py --manifest egna.tsv --experiment 6 --tradar 4           # small mot medium på CPU
-python3 asrbank.py --manifest m.tsv --varianter large:float16:cuda,large:int8:cuda --revision strict
+python3 asrbank.py --manifest m.tsv --varianter large:float16:cuda,large:int8_float16:cuda
 ```
 
 **Manifestet** är en TSV med två kolumner, `ljudfil<TAB>referenstext`, och sökvägarna är relativa till manifestet. Utredningen föreslår FLEURS sv_se test (CC BY 4.0), där KBLab redovisar 5,4 % WER för large i fp16. Ljudet och transkriptionerna finns i datasetrepot `google/fleurs` på Hugging Face, under `data/sv_se/`. Kontrollera kolumnernas namn där innan Du bygger manifestet [I].
 
-**Avkodningen är fast:** svenska, beam 5, `condition_on_previous_text=False` (KBLab:s råd mot hallucinationer) och ingen VAD. Bara variabeln ändras mellan körningarna.
+**Avkodningen är fast och deterministisk:** svenska, beam 5, temperatur 0 (ingen slumpad omavkodning), `condition_on_previous_text=False` (KBLab:s råd mot hallucinationer) och ingen VAD. Varje variant får en kastad uppvärmning på första filen innan tiden mäts. Bara variabeln ändras mellan körningarna.
 
-**WER** räknas på hela korpusen efter normalisering: gemener, skiljetecken bort, blanksteg ihopslagna. Å, ä och ö behålls, men siffror normaliseras inte.
+**Modellnamn:**
+- Bara storlekarna (`tiny` till `large`) eller fulla modell-id godtas. Ett kort namn som `large-v3` skulle tyst ge OpenAI:s modell och avvisas därför.
+- KBLab:s revisioner `strict` och `subtitle` saknar enligt granskningen färdiga filer för CTranslate2 [I]. Använd en ct2-konvertering som fullt modell-id om de behövs.
 
-**RTF** är beräkningstid delad med ljudlängd. Laddningstiden redovisas för sig. Grafikminnet är toppen för hela kortet, som pynvml ser det, och blir OMÄTT utan pynvml.
+**WER** räknas på hela korpusen efter normalisering:
+- gemener;
+- bindestreck och kolon inne i ord tas bort ("e-post", "USA:s");
+- övriga skiljetecken och symboler blir blanksteg;
+- blanksteg slås ihop.
+
+Å, ä och ö behålls, men siffror normaliseras inte. Normaliseringen är densamma för alla varianter, så skillnaden mellan dem är rättvis, men nivån går inte att jämföra med KBLab:s siffror.
+
+**RTF** är beräkningstid delad med ljudlängd. Laddningstiden redovisas för sig, och första gången ingår nedladdningen. Grafikminnet anges i GiB som topp och baslinje för det kort som `CUDA_VISIBLE_DEVICES` pekar på. Utan pynvml blir det OMÄTT.
+
+**JSON-filen** loggar versioner och miljö: Python, faster-whisper, CTranslate2, plattform, processor, trådar och effektiv precision. Utredningen kräver att versionerna loggas.
 
 **Band (utredningens avsnitt 7):**
 - **Experiment 5:** ΔWER(int8 − fp16) ≤ 0,3 procentenheter ger GRÖNT, 0,3–1,0 GRÅTT och över 1,0 RÖTT, och då är fp16 obligatoriskt på GPU.
-- **Experiment 6:** medium RTF ≤ 0,5 ger GRÖNT, 0,5–1,0 GRÅTT och över 1,0 RÖTT, och då gäller small på CPU-noden.
+- **Experiment 6:** medium RTF ≤ 0,5 ger GRÖNT, 0,5–1,0 GRÅTT och över 1,0 RÖTT, och då gäller small på CPU-noden. Bänken mäter bara ct2-delen; whisper.cpp q5_0 är OMÄTT.
+- **Experiment 5 kräver** samma modell och enhet för fp16- och int8-varianten, annars blir bandet OMÄTT.
 
 Bänken sparar inga transkript. **Läge:** provad mot en attrapp, **inte körd med riktiga modeller än (OMÄTT)**. API-anropen följer faster-whisper 1.2.1.
 
-Prov: 16 st i `prov/test_asrbank.py`. De kräver inga beroenden.
+Prov: 19 st i `prov/test_asrbank.py`. De kräver inga beroenden.

@@ -17,7 +17,7 @@ spec = importlib.util.spec_from_file_location("diarbank", VERKTYG)
 db = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(db)
 
-CFG = {"vram_tak_gb": 9.0}
+CFG = {"vram_tak_gib": 9.0}
 BAS = {"rtfx_varm": 2.0}
 
 
@@ -58,8 +58,8 @@ class Band(unittest.TestCase):
         self.assertEqual(self.b("R2", rtfx_varm=2.2, der_delta_pp=0.0), db.GRATT)
 
     def test_r3_minne_och_oom(self):
-        self.assertEqual(self.b("R3-64", rtfx_varm=2.4, vram_reserverat_gb=8.9), db.GRONT)
-        self.assertEqual(self.b("R3-64", rtfx_varm=2.4, vram_reserverat_gb=9.0), db.GRATT)
+        self.assertEqual(self.b("R3-64", rtfx_varm=2.4, vram_reserverat_gib=8.9), db.GRONT)
+        self.assertEqual(self.b("R3-64", rtfx_varm=2.4, vram_reserverat_gib=9.0), db.GRATT)
         self.assertEqual(self.b("R3-64", rtfx_varm=2.4), db.GRATT)          # VRAM omätt: aldrig grönt
         self.assertEqual(self.b("R3-128", oom=True), db.ROTT)
 
@@ -80,8 +80,8 @@ class Hjalp(unittest.TestCase):
         h = [(0.0, "segmentation"), (1.0, "segmentation"), (4.0, "embeddings"),
              (7.0, "embeddings"), (9.0, "discrete_diarization")]
         self.assertEqual(db.stegtider(h, 10.0),
-                         {"segmentation": 4.0, "embeddings": 5.0, "klustring": 2.0,
-                          "discrete_diarization": 1.0})
+                         {"inlasning": 0.0, "segmentation": 4.0, "embeddings": 3.0,
+                          "klustring": 2.0, "discrete_diarization": 1.0})
 
     def test_rtfx(self):
         self.assertEqual(db.rtfx(546, 182), 3.0)
@@ -113,7 +113,7 @@ class Torrkorning(unittest.TestCase):
         self.assertEqual(kor()[0], 1)
 
     def test_hela_planen(self):
-        kod, text, j = torrkorning()
+        kod, text, j = torrkorning("--ref", "attrapp.rttm")
         self.assertEqual(kod, 0)
         r = j["resultat"]
         self.assertEqual(r["B"]["band"], db.ROTT)                 # som referensmätningen, 2,5×
@@ -121,8 +121,37 @@ class Torrkorning(unittest.TestCase):
         self.assertEqual(r["R2"]["band"], db.GRONT)
         self.assertEqual(r["R8"]["band"], db.GRONT)
         self.assertEqual(r["R8"]["inst"], {"tf32": True, "batch": 64, "steg": 0.4})
+        self.assertNotIn("R3-32", r)                                # 32 är redan baslinjen
         self.assertIn("| R5 |", text)
         self.assertNotIn("hyp", r["B"])                            # inga utdata sparas
+
+    def test_utan_referens_blir_der_banden_omatta(self):
+        kod, _, j = torrkorning()
+        r = j["resultat"]
+        self.assertEqual((r["R2"]["band"], r["R4b"]["band"]), (db.OMATT, db.OMATT))
+        self.assertIsNone(r["R2"]["der_delta_pp"])
+        self.assertGreater(r["R2"]["der_sjalv_c0"], 0)
+        self.assertEqual(r["R8"]["inst"], {"batch": 64})
+
+    def test_en_variant_som_faller_stoppar_inte_bänken(self):
+        orig = db.Attrapp.kor
+
+        def kor_med_fel(self, kalla, inst, num_speakers=None):
+            if inst.get("tf32"):
+                raise RuntimeError("påhittat fel")
+            return orig(self, kalla, inst, num_speakers)
+        db.Attrapp.kor = kor_med_fel
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                ut = os.path.join(d, "r.json")
+                self.assertEqual(db.main(["diarbank", "--attrapp", "--upprepa", "1", "--ut", ut]), 0)
+                with open(ut, encoding="utf-8") as f:
+                    r = json.load(f)["resultat"]
+        finally:
+            db.Attrapp.kor = orig
+        self.assertEqual(r["R2"]["band"], db.OMATT)
+        self.assertIn("påhittat fel", r["R2"]["fel"])
+        self.assertIn("R4b", r)                                      # bänken fortsatte
 
     def test_talare_och_referens(self):
         kod, _, j = torrkorning("--talare", "4", "--ref", "attrapp.rttm")
@@ -147,7 +176,7 @@ class Torrkorning(unittest.TestCase):
                                 "--hyp", os.path.join(d, "R4b.rttm"), "--experiment", "2"],
                                capture_output=True, text=True)
             self.assertEqual(r.returncode, 2)          # 8 % färre turer: rött i experiment 2
-            self.assertIn("-8.0 %", r.stdout)
+            self.assertIn("-8.00 %", r.stdout)
 
     def test_attrappen_laddar_inte_torch(self):
         self.assertNotIn("torch", sys.modules)
