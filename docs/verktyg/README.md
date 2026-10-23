@@ -10,6 +10,7 @@ värdnamn, adresser eller sökvägar. Det kontrolleras i CI.
 | [`diarbank.py`](diarbank.py) | Kör bänkplanen för diarisering (B, R1–R4, R7 och kombinationen R8) en variabel i taget och sätter utredningens band GRÖNT/GRÅTT/RÖTT/OMÄTT på varje körning. | [Diarisering på RTX 3080](../utredningar/diarisering-rtx3080.md), avsnitt 4 |
 | [`diarjamfor.py`](diarjamfor.py) | Jämför två diariseringar (RTTM), till exempel Q8_0 mot BF16 eller en port mot sin referens. Mäter turer, DER (missat, falsklarm, förväxling) och etikettskillnad på 10 ms, och sätter banden för experiment 1–3. | [Svensk talarseparerad transkription](../utredningar/svensk-talarseparerad-transkription-2026.md), avsnitt 7 |
 | [`asrbank.py`](asrbank.py) | Mäter KB-Whisper i olika precision och storlek (WER och RTF) och sätter banden för utredning 2:s experiment 5 (fp16 mot int8) och 6 (small mot medium på CPU). | [Svensk talarseparerad transkription](../utredningar/svensk-talarseparerad-transkription-2026.md), avsnitt 7 |
+| [`cpwer.py`](cpwer.py) | Ordfel med talare (cpWER) för talarseparerade transkript, med WER utan talare och talarkostnaden. Sätter experiment 8:s band mellan två kedjor. | [Svensk talarseparerad transkription](../utredningar/svensk-talarseparerad-transkription-2026.md), avsnitt 7 |
 
 ## usbdjup
 
@@ -151,3 +152,29 @@ python3 asrbank.py --manifest m.tsv --varianter large:float16:cuda,large:int8_fl
 Bänken sparar inga transkript. **Läge:** provad mot en attrapp, **inte körd med riktiga modeller än (OMÄTT)**. API-anropen följer faster-whisper 1.2.1.
 
 Prov: 19 st i `prov/test_asrbank.py`. De kräver inga beroenden.
+
+## cpwer
+
+```
+python3 cpwer.py --ref facit.tsv --hyp kedja-a.tsv
+python3 cpwer.py --ref facit/ --hyp kedja-a/ --jamfor kedja-b/ --experiment 8 --ut resultat.json
+```
+
+Transkripten är TSV-filer med en replik per rad i tidsordning: `talare<TAB>text`. Med kataloger paras filerna ihop på filnamn.
+
+**cpWER:** varje talares ord läggs i följd. Hypotesens talare paras sedan med facits talare så att felen blir så få som möjligt (CHiME-6). En talare utan motpart räknas med alla sina ord som fel. Ett rätt ord hos fel talare kostar alltså också.
+
+**Utskriften visar:**
+- cpWER;
+- WER utan talare, alltså samma ord i tidsordning;
+- talarkostnaden, cpWER − WER, det som felaktig talartillskrivning kostar.
+
+**Band:** med `--jamfor` sätts experiment 8:s band på kedja A mot kedja B. A ≤ B ger GRÖNT, högst +1 procentenhet GRÅTT, mer RÖTT. Utredningens krav på grafikminne mäts med `diarbank.py` och `asrbank.py`.
+
+**Beroenden:** normaliseringen och ordfelen kommer från `asrbank.py` och talarparningen från `diarjamfor.py`, så filerna hör ihop. Parningen är provad mot uttömmande sökning i 150 slumpfall.
+
+**Avslutningskod:** `0` klart, `2` RÖTT, `1` fel.
+
+**Facit måste vara grönt:** påhittade eller iscensatta möten, aldrig riktiga.
+
+Prov: 7 st i `prov/test_cpwer.py`.
