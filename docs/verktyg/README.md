@@ -1,0 +1,191 @@
+# Verktyg
+
+Små, generiska verktyg som följer med utredningarna. Inget av dem bär husdata: inga
+värdnamn, adresser eller sökvägar. Det kontrolleras i CI.
+
+| Verktyg | Vad det gör | Hör till |
+|---|---|---|
+| [`usbdjup.py`](usbdjup.py) | Läser en UsbTreeView-rapport (XML), visar varje hubbkedja med sitt djup, flaggar allt som sitter djupare än fem hubbar och föreslår den minsta flytt som löser det. | [USB-topologi](../utredningar/usb-topologi.md) |
+| [`usbserver-installera.sh`](usbserver-installera.sh) | Gör en Linux-nod till USB/IP-server och lägger till kommandot `usbdela`. Vägrar alltid lagringsenheter och hubbar. | [USB-topologi](../utredningar/usb-topologi.md), avsnitt 5 |
+| [`diarbank.py`](diarbank.py) | Kör bänkplanen för diarisering (B, R1–R4, R7 och kombinationen R8) en variabel i taget och sätter utredningens band GRÖNT/GRÅTT/RÖTT/OMÄTT på varje körning. | [Diarisering på RTX 3080](../utredningar/diarisering-rtx3080.md), avsnitt 4 |
+| [`diarjamfor.py`](diarjamfor.py) | Jämför två diariseringar (RTTM), till exempel Q8_0 mot BF16 eller en port mot sin referens. Mäter turer, DER (missat, falsklarm, förväxling) och etikettskillnad på 10 ms, och sätter banden för experiment 1–3. | [Svensk talarseparerad transkription](../utredningar/svensk-talarseparerad-transkription-2026.md), avsnitt 7 |
+| [`asrbank.py`](asrbank.py) | Mäter KB-Whisper i olika precision och storlek (WER och RTF) och sätter banden för utredning 2:s experiment 5 (fp16 mot int8) och 6 (small mot medium på CPU). | [Svensk talarseparerad transkription](../utredningar/svensk-talarseparerad-transkription-2026.md), avsnitt 7 |
+| [`cpwer.py`](cpwer.py) | Ordfel med talare (cpWER) för talarseparerade transkript, med WER utan talare och talarkostnaden. Sätter experiment 8:s band mellan två kedjor. | [Svensk talarseparerad transkription](../utredningar/svensk-talarseparerad-transkription-2026.md), avsnitt 7 |
+
+## usbdjup
+
+```
+# I UsbTreeView: File → Save Report (XML)
+python3 usbdjup.py rapport.xml
+```
+
+Avslutningskod: `0` om inget sitter för djupt, `2` om minst en hubb gör det, `1` vid fel.
+Utskriften innehåller bara portkedjor, krets-ID (VID:PID) och status, aldrig enhetsnamn.
+Den kan därför klistras in i en chatt eller en PR.
+
+Prov: `python3 -m unittest discover -s docs/verktyg/prov`. Proven körs mot syntetiska
+rapporter, en med sex hubbar i rad och ostängda XML-noder (som UsbTreeViews egna ibland
+har) och en platt. De kontrollerar också att ett påhittat enhetsnamn inte läcker ut i
+utskriften.
+
+## usbserver-installera.sh
+
+```
+sudo ./usbserver-installera.sh            # bara Tailscale når port 3240
+sudo ./usbserver-installera.sh --lan 192.168.1.0/24
+```
+
+Därefter `sudo usbdela lista`, `sudo usbdela dela vvvv:pppp` och `sudo usbdela sluta vvvv:pppp`.
+Syntaxkontrollerat och shellcheck-rent. Ännu inte kört på riktig maskin, så börja med en
+enhet som inte gör något om den krånglar.
+
+## diarbank
+
+```
+pip install "pyannote.audio==4.0.7" psutil      # med ett CUDA-bygge av torch
+export HF_TOKEN=…                               # efter att villkoren för community-1 är godkända
+python3 diarbank.py --lista                     # visa planen
+python3 diarbank.py --ljud klipp.wav --ref klipp.rttm --ut resultat.json
+```
+
+Bänken följer utredningens avsnitt 4 rad för rad:
+- **Uppvärmning:** 30 s svagt brus, som kastas.
+- **Baslinjen:** först en kall körning, sedan median av `--upprepa` varma (standard 3).
+- **En variabel i taget:** varje variant får en kastad körning först.
+
+Den mäter:
+- väggtid och **RTFx**, det vill säga ljudlängd delad med väggtid;
+- tid per steg ur pyannotes hook, och klustringen för sig;
+- toppen för allokerat och reserverat grafikminne;
+- CPU-last om `psutil` finns;
+- antal talare;
+- **DER** med `pyannote.metrics`, collar 0 och ±0,25 s (pyannotes `collar=0.5`).
+
+**DER-banden (R2, R4, R8) bedöms bara med `--ref`.** Utredningen mäter DER-skillnaden mot en referens. Utan `--ref` redovisas självkonsistensen, alltså DER mot baslinjens egen utdata, i en egen kolumn, och DER-banden blir OMÄTT. **Fel antal talare i R4b** jämförs med referensen när den finns, annars med baslinjen.
+
+**R3** provar batch 64 och 128. community-1 kör redan 32, så 32 är baslinjen. Grafikminnet anges i GiB, och gränsen för R3 är som standard utredningens 9 GB, det vill säga 8,38 GiB (`--vram-tak-gib`).
+
+**Utan `--ref` gäller fartens röda gränser ändå.** R2 under +5 %, R4a under 1,2× och R4b under 1,5× blir RÖTT. Bara de gröna och gråa banden kräver DER.
+
+**Tolkningsregeln** varnar när B är RÖTT och ingen av R1–R7 blev GRÖNT. Utredningen säger "alla gråa". Här hindrar alltså varken en OOM-röd R3 eller ett OMÄTT utan referens varningen.
+
+**Stegtider:** förutom stegen redovisas inläsningen (tiden före första hook-anropet) och klustringen (tiden efter sista embeddings-anropet) för sig.
+
+**R2 (TF32)** kopplar in sig efter pyannotes `fix_reproducibility()`, som annars stänger av TF32 vid varje anrop. **R4 (steget)** skriver direkt till segmenteringens `step` i sekunder. Pipelinens attribut läses bara när den skapas, så det räcker inte att ändra det. **R8** kombinerar alla gröna varianter. Från R3 och R4 tas bara den snabbaste. R5, R6 och R9–R11 ingår inte och redovisas som OMÄTT.
+
+**Testklipp:** bara grönt ljud. Utredningen föreslår AMI-mötet ES2004a, som är CC BY 4.0. Referenser i RTTM finns i [pyannote/AMI-diarization-setup](https://github.com/pyannote/AMI-diarization-setup). Bänken sparar inga transkript och ingen utdata, bara tider, minne och fel. Token läses ur en miljövariabel och skrivs aldrig ut.
+
+**Turparitet:** med `--rttm-katalog d/` sparas varje variants diarisering som `d/<körning>.rttm`. Sedan avgör `python3 diarjamfor.py --ref d/B.rttm --hyp d/R4b.rttm` om ändringen flyttade talarturerna. Spara bara RTTM för testklipp: RTTM från riktigt ljud är husdata.
+
+**Tidsåtgång:** med standardvärdena blir det ungefär 40 körningar. Går ett 9-minutersklipp i referensmätningens takt, cirka 3 minuter per körning, tar bänken ett par timmar. Börja med `--upprepa 1`, eller ett urval med `--korningar B,R2,R4b`.
+
+**Avslutningskod:**
+- `0`: klart.
+- `2`: rimlighetskontrollen föll, eftersom segmenteringsmodellen inte ligger på GPU:n. Felsök då torch-bygget och drivrutinen innan något annat mäts.
+- `1`: fel, även felaktiga argument.
+
+Faller en enskild variant, till exempel av minnesbrist (också pyannotes `MemoryError` i segmenteringen) eller av något annat fel, blir den OMÄTT eller RÖTT och bänken fortsätter. Fel vid DER-beräkningen eller när RTTM sparas tar inte bort de uppmätta tiderna. JSON-filen skrivs efter varje variant. Ljudlängden läses ur WAV-huvudet, så baslinjens kallstart blir verkligt kall.
+
+**Läge:** syntaxkontrollerad, och provad mot en attrapp som återger referensmätningens takt. Attrappen täcker banden, kombinationen, urvalet och DER mot referens och mot baslinjen. **Bänken är inte körd på en GPU än. Dess första riktiga mätning är OMÄTT** tills någon har gjort den. Kodvägen mot pyannote följer källan till 4.0.7.
+
+Prov: `python3 -m unittest discover -s docs/verktyg/prov`. Proven behöver varken torch eller pyannote.
+
+## diarjamfor
+
+```
+python3 diarjamfor.py --ref bf16.rttm --hyp q8.rttm --experiment 2
+python3 diarjamfor.py --ref bf16/ --hyp q8/ --experiment 2 --ut resultat.json   # kataloger, paras på filnamn
+```
+
+Verktyget är oberoende av körmotor. Det enda det behöver är två RTTM-filer, till exempel från audio.cpp, NeMo, parakeet.cpp eller pyannote.
+
+**Mått, per fil och viktat totalt:**
+- **turer:** sammanhängande tal av en talare på 10 ms-rutnätet, där segment med samma talare som överlappar eller möts slås ihop, och avvikelsen i procent. Antalet RTTM-rader redovisas för sig;
+- **DER:** med referensen som facit, collar 0 och överlapp inräknat, uppdelad på missat, falsklarm och förväxling;
+- **etikettskillnad:** andel av tidslinjens 10 ms-ramar där någon etiketts aktivitet skiljer sig, utan matchning (utredningens "same-label-aktivitetsskillnad"). Måttet är bara meningsfullt när båda körningarna kommer från samma modell.
+
+**Med `--facit`** (en handmärkt referens eller en forced-alignment-referens) bedöms banden på DER-skillnaden |DER(hyp, facit) − DER(ref, facit)|. Det är den storhet som de publicerade paritetsmätningarna redovisar. Utan facit bedöms banden på DER med `--ref` som facit. Utredningen har inte avgjort vilket av måtten den avser, så tabellen anger vilket som användes.
+
+Talarna matchas optimalt med den ungerska metoden. Den är provad mot uttömmande sökning i 200 slumpfall.
+
+**Korskontroll:** utan självöverlapp ger verktyget samma DER som pyannote.metrics 3.2.1 och 4.2.0 (den version pyannote.audio 4.0.7 drar in). Största skillnaden över 30 slumpade femminutersmöten var 0,0005 procentenheter. Självöverlapp hos samma talare räknas en gång, som i NIST:s md-eval. Ett möte på 15 minuter med fem talare tar under en sekund.
+
+**Band (utredningens avsnitt 7):**
+- **Experiment 1:** GRÖNT vid DER ≤ 2 % och turer inom ±1 %. RÖTT vid DER > 6 % eller turer utanför ±3 %.
+- **Experiment 2 och 3:** GRÖNT vid turer inom ±2 % och DER ≤ 0,5 %. RÖTT vid turer utanför ±6 % eller DER > 1,5 %.
+- Däremellan GRÅTT.
+
+**Avslutningskod:** `0` vid GRÖNT eller GRÅTT, `2` om totalen eller någon enskild fil är RÖTT, `1` vid fel, även felaktiga argument. Totalen räknas på summerade ramar, och den största avvikelsen i turer per fil redovisas. Två filer utan tal räknas som överensstämmelse (GRÖNT). Filer med BOM läses rätt. Verktyget läser bara tider och etiketter, aldrig ljud eller text.
+
+Prov: 21 st i `prov/test_diarjamfor.py`. De kräver inga beroenden.
+
+## asrbank
+
+```
+pip install faster-whisper pynvml                      # pynvml bara för grafikminnet
+python3 asrbank.py --manifest fleurs-sv-test.tsv --experiment 5            # large fp16 mot int8 på GPU
+python3 asrbank.py --manifest egna.tsv --experiment 6 --tradar 4           # small mot medium på CPU
+python3 asrbank.py --manifest m.tsv --varianter large:float16:cuda,large:int8_float16:cuda
+```
+
+**Manifestet** är en TSV med två kolumner, `ljudfil<TAB>referenstext`, och sökvägarna är relativa till manifestet. Utredningen föreslår FLEURS sv_se test (CC BY 4.0), där KBLab redovisar 5,4 % WER för large i fp16. Ljudet och transkriptionerna finns i datasetrepot `google/fleurs` på Hugging Face, under `data/sv_se/`. Kontrollera kolumnernas namn där innan Du bygger manifestet [I].
+
+**Avkodningen är fast och deterministisk:** svenska, beam 5, temperatur 0 (ingen slumpad omavkodning), `condition_on_previous_text=False` (KBLab:s råd mot hallucinationer) och ingen VAD. Varje variant får en kastad uppvärmning på första filen innan tiden mäts. Bara variabeln ändras mellan körningarna.
+
+**Modellnamn:**
+- Bara storlekarna (`tiny` till `large`) eller fulla modell-id godtas. Ett kort namn som `large-v3` skulle tyst ge OpenAI:s modell och avvisas därför.
+- KBLab:s revisioner `strict` och `subtitle` saknar enligt granskningen färdiga filer för CTranslate2 [I]. Använd en ct2-konvertering som fullt modell-id om de behövs.
+
+**WER** räknas på hela korpusen efter normalisering:
+- gemener;
+- bindestreck och kolon inne i ord tas bort ("e-post", "USA:s");
+- övriga skiljetecken och symboler blir blanksteg;
+- blanksteg slås ihop.
+
+Å, ä och ö behålls, men siffror normaliseras inte. Normaliseringen är densamma för alla varianter, så skillnaden mellan dem är rättvis, men nivån går inte att jämföra med KBLab:s siffror.
+
+**RTF** är beräkningstid delad med ljudlängd. Laddningstiden redovisas för sig, och första gången ingår nedladdningen.
+
+**Grafikminnet:**
+- anges i GiB som topp och baslinje för det kort som `CUDA_VISIBLE_DEVICES` pekar på, med nummer eller UUID;
+- `CUDA_DEVICE_ORDER=PCI_BUS_ID` sätts, så att CUDA och NVML räknar korten lika;
+- den första CUDA-varianten skapar CUDA-kontexten, och kontexten ligger kvar. Jämför därför toppvärdena, inte skillnaden mellan topp och baslinje;
+- blir OMÄTT utan pynvml.
+
+**JSON-filen** loggar versioner och miljö: Python, faster-whisper, CTranslate2, plattform, processor, trådar och effektiv precision. Utredningen kräver att versionerna loggas.
+
+**Band (utredningens avsnitt 7):**
+- **Experiment 5:** ΔWER(int8 − fp16) ≤ 0,3 procentenheter ger GRÖNT, 0,3–1,0 GRÅTT och över 1,0 RÖTT, och då är fp16 obligatoriskt på GPU.
+- **Experiment 6:** medium RTF ≤ 0,5 ger GRÖNT, 0,5–1,0 GRÅTT och över 1,0 RÖTT, och då gäller small på CPU-noden. Bänken mäter bara ct2-delen; whisper.cpp q5_0 är OMÄTT.
+- **Experiment 5 kräver** samma modell och enhet för fp16- och int8-varianten, annars blir bandet OMÄTT. Bänken letar upp ett sådant par bland alla varianter.
+
+Bänken sparar inga transkript. **Läge:** provad mot en attrapp, **inte körd med riktiga modeller än (OMÄTT)**. API-anropen följer faster-whisper 1.2.1.
+
+Prov: 20 st i `prov/test_asrbank.py`. De kräver inga beroenden.
+
+## cpwer
+
+```
+python3 cpwer.py --ref facit.tsv --hyp kedja-a.tsv
+python3 cpwer.py --ref facit/ --hyp nemotron/ --jamfor whisperx/ --ut resultat.json
+```
+
+Transkripten är TSV-filer med en replik per rad i tidsordning: `talare<TAB>text`. Med kataloger paras filerna ihop på filnamn.
+
+**cpWER:** varje talares ord läggs i följd. Hypotesens talare paras sedan med facits talare så att felen blir så få som möjligt (CHiME-6). En talare utan motpart räknas med alla sina ord som fel. Ett rätt ord hos fel talare kostar alltså också.
+
+**Utskriften visar** cpWER och WER utan talare, alltså alla repliker i filens ordning. WER utan talare beror på hur repliker från olika talare är ordnade, till exempel ett "ja" inskjutet mitt i någon annans tur. Den kan därför bli både högre och lägre än cpWER, och skillnaden redovisas inte som en "talarkostnad".
+
+**Band:** riktningen är fast. `--hyp` är Nemotron-kedjan och `--jamfor` är whisperX-kedjan.
+- Nemotron ≤ whisperX ger GRÖNT, högst +1 procentenhet GRÅTT och mer än så RÖTT.
+- Bandet täcker bara cpWER-halvan och sparas som `band_cpwer`.
+- Utredningens krav på grafikminne (≤ 5,0 GB för hela kedjan) saknar verktyg, eftersom diarbank inte kör Nemotron.
+- Experiment 7:s huvudmått, andel ord med rätt talare, kräver ordtider och ingår inte.
+
+**Beroenden:** normaliseringen och ordfelen kommer från `asrbank.py` och talarparningen från `diarjamfor.py`, så filerna hör ihop. Parningen är provad mot uttömmande sökning i 150 slumpfall.
+
+**Avslutningskod:** `0` klart, `2` RÖTT, `1` fel, även tomt facit och felaktiga argument.
+
+**Facit måste vara grönt:** påhittade eller iscensatta möten, aldrig riktiga.
+
+Prov: 9 st i `prov/test_cpwer.py`.
