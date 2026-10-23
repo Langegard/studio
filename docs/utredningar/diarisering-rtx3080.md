@@ -137,6 +137,8 @@ Baslinje **B** = community‑1, `config.yaml`‑defaults, ljud via filsökväg, 
 | R10 | Nemotron 3 ONNX int8, CPU, 4 och 8 trådar [[46]](https://huggingface.co/joosthel/Nemotron-3-Diarization-ONNX) | RTFx ≥ 20× (porten mäter 55–125× på i9) och DER‑Δ mot R9 ≤ 0,5 | 5–20× | < 5× |
 | R11 | whisperX (`--diarize`, community‑1) – enbart diariseringssteget tidsatt [[51]](https://github.com/m-bain/whisperX/blob/main/whisperx/diarize.py) | inom ±15 % av R1 (bekräftar att whisperX inte tillför overhead) | – | > 30 % långsammare än R1 |
 
+**Körbar bänk:** [`docs/verktyg/diarbank.py`](../verktyg/diarbank.py) kör B, R1–R4, R7 och R8 enligt reglerna ovan och sätter banden automatiskt (tillägg 23/10, ännu inte körd på GPU).
+
 **Tolkningsregel:** blir B rött *och* R1–R7 alla gråa, är GPU:n inte flaskhalsen – felsök miljön (torch‑build, `.to(cuda)`, Windows‑drivrutin; jfr [[21]](https://github.com/pyannote/pyannote-audio/issues/1702)) innan fler parametrar testas.
 
 ---

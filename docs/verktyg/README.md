@@ -7,6 +7,7 @@ värdnamn, adresser eller sökvägar. Det kontrolleras i CI.
 |---|---|---|
 | [`usbdjup.py`](usbdjup.py) | Läser en UsbTreeView-rapport (XML), visar varje hubbkedja med sitt djup, flaggar allt som sitter djupare än fem hubbar och föreslår den minsta flytt som löser det. | [USB-topologi](../utredningar/usb-topologi.md) |
 | [`usbserver-installera.sh`](usbserver-installera.sh) | Gör en Linux-nod till USB/IP-server och lägger till kommandot `usbdela`. Vägrar alltid lagringsenheter och hubbar. | [USB-topologi](../utredningar/usb-topologi.md), avsnitt 5 |
+| [`diarbank.py`](diarbank.py) | Kör bänkplanen för diarisering (B, R1–R4, R7 och kombinationen R8) en variabel i taget och sätter utredningens band GRÖNT/GRÅTT/RÖTT/OMÄTT på varje körning. | [Diarisering på RTX 3080](../utredningar/diarisering-rtx3080.md), avsnitt 4 |
 
 ## usbdjup
 
@@ -34,3 +35,42 @@ sudo ./usbserver-installera.sh --lan 192.168.1.0/24
 Därefter `sudo usbdela lista`, `sudo usbdela dela vvvv:pppp` och `sudo usbdela sluta vvvv:pppp`.
 Syntaxkontrollerat och shellcheck-rent. Ännu inte kört på riktig maskin, så börja med en
 enhet som inte gör något om den krånglar.
+
+## diarbank
+
+```
+pip install "pyannote.audio==4.0.7" psutil      # med ett CUDA-bygge av torch
+export HF_TOKEN=…                               # efter att villkoren för community-1 är godkända
+python3 diarbank.py --lista                     # visa planen
+python3 diarbank.py --ljud klipp.wav --ref klipp.rttm --ut resultat.json
+```
+
+Bänken följer utredningens avsnitt 4 rad för rad:
+- **Uppvärmning:** 30 s svagt brus, som kastas.
+- **Baslinjen:** först en kall körning, sedan median av `--upprepa` varma (standard 3).
+- **En variabel i taget:** varje variant får en kastad körning först.
+
+Den mäter:
+- väggtid och **RTFx**, det vill säga ljudlängd delad med väggtid;
+- tid per steg ur pyannotes hook, och klustringen för sig;
+- toppen för allokerat och reserverat grafikminne;
+- CPU-last om `psutil` finns;
+- antal talare;
+- **DER** med `pyannote.metrics`, collar 0 och ±0,25 s (pyannotes `collar=0.5`).
+
+Utan `--ref` mäts DER mot baslinjens egen utdata (självkonsistens).
+
+**R2 (TF32)** kopplar in sig efter pyannotes `fix_reproducibility()`, som annars stänger av TF32 vid varje anrop. **R4 (steget)** skriver direkt till segmenteringens `step` i sekunder. Pipelinens attribut läses bara när den skapas, så det räcker inte att ändra det. **R8** kombinerar alla gröna varianter. Från R3 och R4 tas bara den snabbaste. R5, R6 och R9–R11 ingår inte och redovisas som OMÄTT.
+
+**Testklipp:** bara grönt ljud. Utredningen föreslår AMI-mötet ES2004a, som är CC BY 4.0. Referenser i RTTM finns i [pyannote/AMI-diarization-setup](https://github.com/pyannote/AMI-diarization-setup). Bänken sparar inga transkript och ingen utdata, bara tider, minne och fel. Token läses ur en miljövariabel och skrivs aldrig ut.
+
+**Tidsåtgång:** med standardvärdena blir det ungefär 40 körningar. Går ett 9-minutersklipp i referensmätningens takt, cirka 3 minuter per körning, tar bänken ett par timmar. Börja med `--upprepa 1`, eller ett urval med `--korningar B,R2,R4b`.
+
+**Avslutningskod:**
+- `0`: klart.
+- `2`: rimlighetskontrollen föll, eftersom segmenteringsmodellen inte ligger på GPU:n. Felsök då torch-bygget och drivrutinen innan något annat mäts.
+- `1`: fel.
+
+**Läge:** syntaxkontrollerad, och provad mot en attrapp som återger referensmätningens takt. Attrappen täcker banden, kombinationen, urvalet och DER mot referens och mot baslinjen. **Bänken är inte körd på en GPU än. Dess första riktiga mätning är OMÄTT** tills någon har gjort den. Kodvägen mot pyannote följer källan till 4.0.7.
+
+Prov: `python3 -m unittest discover -s docs/verktyg/prov`. Proven behöver varken torch eller pyannote.
