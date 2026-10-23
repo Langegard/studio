@@ -253,6 +253,8 @@ Detta är kärnfrågan för referensfyndet (Q8_0 tappade 9 av 161 turer på 311 
 
 ## 7. Rekommenderad provordning
 
+**Verktyg (tillägg 23/10):** jämförelsen i experiment 1–3 görs av [`docs/verktyg/diarjamfor.py`](../verktyg/diarjamfor.py). Det tar två RTTM-filer eller kataloger och sätter banden nedan automatiskt.
+
 Alla experiment: 16 kHz mono, samma ljudfiler, fasta versioner/commits loggade. DER rapporteras med collar 0 och overlap inkluderad enligt NVIDIA:s konvention ([diarization_evaluation.md](https://huggingface.co/nvidia/Nemotron-3-Diarization/blob/main/diarization_evaluation.md)). Tröskelvärdena är **[I]** och satta utifrån de publicerade paritetsdata ovan.
 
 1. **Portparitet BF16-GGUF mot NeMo/Transformers-referens (Nemotron).** *Syfte:* separera portfel från kvantiseringsfel. *Variabel:* runtime (audio.cpp BF16 vs NeMo Python bf16), samma offline-geometri (chunk 340, rc 40, fifo 40, spkcache 264, update 300). *Förväntat:* nära identiska turer; publicerat 4–5 % DER-avvikelse på strömmar, lägre offline. *Grönt:* DER(GGUF vs NeMo) ≤ 2 % och turantal ±1 %. *Grått:* 2–6 % eller ±1–3 %. *Rött:* > 6 % eller > 3 % turavvikelse → uppgradera runtime/GGUF innan vidare tester.

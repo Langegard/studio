@@ -8,6 +8,7 @@ värdnamn, adresser eller sökvägar. Det kontrolleras i CI.
 | [`usbdjup.py`](usbdjup.py) | Läser en UsbTreeView-rapport (XML), visar varje hubbkedja med sitt djup, flaggar allt som sitter djupare än fem hubbar och föreslår den minsta flytt som löser det. | [USB-topologi](../utredningar/usb-topologi.md) |
 | [`usbserver-installera.sh`](usbserver-installera.sh) | Gör en Linux-nod till USB/IP-server och lägger till kommandot `usbdela`. Vägrar alltid lagringsenheter och hubbar. | [USB-topologi](../utredningar/usb-topologi.md), avsnitt 5 |
 | [`diarbank.py`](diarbank.py) | Kör bänkplanen för diarisering (B, R1–R4, R7 och kombinationen R8) en variabel i taget och sätter utredningens band GRÖNT/GRÅTT/RÖTT/OMÄTT på varje körning. | [Diarisering på RTX 3080](../utredningar/diarisering-rtx3080.md), avsnitt 4 |
+| [`diarjamfor.py`](diarjamfor.py) | Jämför två diariseringar (RTTM), till exempel Q8_0 mot BF16 eller en port mot sin referens. Mäter turer, DER (missat, falsklarm, förväxling) och etikettskillnad på 10 ms, och sätter banden för experiment 1–3. | [Svensk talarseparerad transkription](../utredningar/svensk-talarseparerad-transkription-2026.md), avsnitt 7 |
 
 ## usbdjup
 
@@ -74,3 +75,30 @@ Utan `--ref` mäts DER mot baslinjens egen utdata (självkonsistens).
 **Läge:** syntaxkontrollerad, och provad mot en attrapp som återger referensmätningens takt. Attrappen täcker banden, kombinationen, urvalet och DER mot referens och mot baslinjen. **Bänken är inte körd på en GPU än. Dess första riktiga mätning är OMÄTT** tills någon har gjort den. Kodvägen mot pyannote följer källan till 4.0.7.
 
 Prov: `python3 -m unittest discover -s docs/verktyg/prov`. Proven behöver varken torch eller pyannote.
+
+## diarjamfor
+
+```
+python3 diarjamfor.py --ref bf16.rttm --hyp q8.rttm --experiment 2
+python3 diarjamfor.py --ref bf16/ --hyp q8/ --experiment 2 --ut resultat.json   # kataloger, paras på filnamn
+```
+
+Verktyget är oberoende av körmotor. Det enda det behöver är två RTTM-filer, till exempel från audio.cpp, NeMo, parakeet.cpp eller pyannote.
+
+**Mått, per fil och viktat totalt:**
+- **turer:** antal segment och avvikelsen i procent;
+- **DER:** med referensen som facit, collar 0 och överlapp inräknat, uppdelad på missat, falsklarm och förväxling;
+- **etikettskillnad:** andel 10 ms-ramar där etiketterna skiljer sig utan matchning. Måttet är bara meningsfullt när båda körningarna kommer från samma modell.
+
+Talarna matchas optimalt med den ungerska metoden. Den är provad mot uttömmande sökning i 200 slumpfall.
+
+**Korskontroll:** utan självöverlapp ger verktyget samma DER som pyannote.metrics 3.2.1. Största skillnaden över 30 slumpade femminutersmöten var 0,0005 procentenheter. Självöverlapp hos samma talare räknas en gång, som i NIST:s md-eval. Ett möte på 15 minuter med fem talare tar under en sekund.
+
+**Band (utredningens avsnitt 7):**
+- **Experiment 1:** GRÖNT vid DER ≤ 2 % och turer inom ±1 %. RÖTT vid DER > 6 % eller turer utanför ±3 %.
+- **Experiment 2 och 3:** GRÖNT vid turer inom ±2 % och DER ≤ 0,5 %. RÖTT vid turer utanför ±6 % eller DER > 1,5 %.
+- Däremellan GRÅTT.
+
+**Avslutningskod:** `0` vid GRÖNT eller GRÅTT, `2` vid RÖTT, `1` vid fel. Verktyget läser bara tider och etiketter, aldrig ljud eller text.
+
+Prov: 16 st i `prov/test_diarjamfor.py`. De kräver inga beroenden.
