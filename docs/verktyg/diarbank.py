@@ -33,6 +33,15 @@ eller påhittade inspelningar. Bänken sparar inga transkript, bara tider,
 minne och diariseringsfel. Token för Hugging Face läses ur en miljövariabel
 och skrivs aldrig ut.
 
+Banden i tabell 4.4 är satta för RTX 3080 (10 GB). På ett annat kort skriver
+bänken ut en varning och sparar den i JSON (jamforbarhet): B:s och R8:s
+gränser i gånger realtid är då inte jämförbara, men R1–R4 mäts mot B på samma
+kort, och DER-banden och R3:s minnesgräns gäller fortfarande. Kortets namn,
+beräkningsförmåga, drivrutin och versionerna av torch och pyannote sparas
+under miljo. Saknar torch-bygget maskinkod för kortet (till exempel ett äldre
+bygge på ett Blackwell-kort, sm_120) stannar bänken före första körningen med
+ett tydligt fel i stället för CUDA:s "no kernel image".
+
 Avslutningskod: 0 = klart, 2 = rimlighetskontrollen föll (pipelinen ligger
 inte på GPU:n), 1 = fel. Fel i en enskild variant stoppar inte bänken; den
 varianten blir OMÄTT och resultatet sparas efter varje variant.
@@ -40,6 +49,7 @@ varianten blir OMÄTT och resultatet sparas efter varje variant.
 import argparse
 import json
 import os
+import platform
 import statistics
 import sys
 import threading
@@ -214,6 +224,56 @@ def tolkningsregel(resultat):
     return bool(b == ROTT and ovriga and GRONT not in ovriga)
 
 
+def har_karnor(kap, arkitekturer):
+    """Kan ett torch-bygge med dessa arkitekturer köra på ett kort med beräkningsförmågan kap?
+
+    kap = (major, minor), t.ex. (12, 0) för RTX 5090; arkitekturer som i
+    torch.cuda.get_arch_list(), t.ex. ["sm_86", "sm_90", "compute_90"].
+    Maskinkod för sm_XY går på samma major med minor ≥ Y. PTX (compute_XY) kan
+    drivrutinen kompilera för varje nyare kort. sm_XYa och sm_XYf går bara på
+    exakt det kortet.
+    """
+    maj, mi = kap
+    mal = maj * 10 + mi
+    for a in arkitekturer:
+        typ, _, nr = a.partition("_")
+        if nr[-1:] in ("a", "f") and nr[:-1].isdigit():
+            if typ == "sm" and int(nr[:-1]) == mal:
+                return True
+            continue
+        if not nr.isdigit():
+            continue
+        amaj, ami = divmod(int(nr), 10)
+        if typ == "sm" and amaj == maj and ami <= mi:
+            return True
+        if typ == "compute" and int(nr) <= mal:
+            return True
+    return False
+
+
+def jamforbarhet(kort):
+    """None på RTX 3080 (utredningens kort), annars en varning om vilka band som inte går att jämföra."""
+    if kort and "3080" in kort:
+        return None
+    return (f"Banden i tabell 4.4 är satta för RTX 3080 (10 GB); det här är {kort or 'ingen känd GPU'}. "
+            "B:s och R8:s gränser i gånger realtid är inte jämförbara. R1–R4 mäts mot B på "
+            "samma kort, och DER-banden och R3:s minnesgräns (ryms det på en 3080?) gäller.")
+
+
+def drivrutin():
+    """NVIDIA-drivrutinens version via pynvml, eller None."""
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        try:
+            v = pynvml.nvmlSystemGetDriverVersion()
+        finally:
+            pynvml.nvmlShutdown()
+        return v.decode() if isinstance(v, bytes) else v
+    except Exception:                            # noqa: BLE001 — utan pynvml blir den bara okänd
+        return None
+
+
 def fmt(x, enhet=""):
     if x is None:
         return OMATT
@@ -229,6 +289,7 @@ class Attrapp:
     baslinjen) så att alla band kan provas.
     """
     namn = "attrapp"
+    KORT = "attrapp med RTX 3080-profil"
     FAKTOR = {"minne": 1.05, "tf32": 1.3, ("batch", 64): 1.3,
               ("steg", 0.2): 1.8, ("steg", 0.4): 2.8, "talare": 1.1}
     DER_PP = {"tf32": 0.1, ("steg", 0.2): 0.3, ("steg", 0.4): 0.8}
@@ -239,6 +300,9 @@ class Attrapp:
 
     def ljudlangd(self, kalla):
         return self.langd
+
+    def miljo(self):
+        return {"python": platform.python_version(), "kort": self.KORT}
 
     def uppvarm(self):
         return self.kor(None, {})
@@ -291,18 +355,50 @@ class Pyannote:
         # fix_reproducibility() slår av TF32 vid varje anrop; den importeras på två ställen.
         self._moduler = (inferens, karna)
         self._original = (inferens.fix_reproducibility, karna.fix_reproducibility)
+        self.enhet = torch.device(enhet)
+        self._kontrollera_cuda()
         token = os.environ.get(token_variabel) or None
         self.pipeline = Pipeline.from_pretrained(modell, token=token)
         if self.pipeline is None:
             raise RuntimeError(f"kunde inte ladda {modell}; godkänn villkoren på "
                                f"Hugging Face och sätt {token_variabel}")
-        self.enhet = torch.device(enhet)
         self.pipeline.to(self.enhet)
         seg = self.pipeline._segmentation
         self._bas = {"seg_batch": self.pipeline.segmentation_batch_size,
                      "emb_batch": self.pipeline.embedding_batch_size,
                      "steg_s": seg.step, "fonster_s": seg.duration}
         self._minne = {}
+
+    def _kontrollera_cuda(self):
+        """Stanna före modellen om torch inte kan köra på kortet, med ett begripligt fel."""
+        torch = self.torch
+        if self.enhet.type != "cuda":
+            return
+        bygge = f"torch {torch.__version__}, byggt för CUDA {torch.version.cuda}"
+        if not torch.cuda.is_available():
+            raise RuntimeError(f"torch ser ingen CUDA-enhet ({bygge}). Kontrollera drivrutinen "
+                               "med nvidia-smi och att torch inte är CPU-bygget.")
+        kap = torch.cuda.get_device_capability(self.enhet)
+        arkitekturer = torch.cuda.get_arch_list()
+        if not har_karnor(kap, arkitekturer):
+            raise RuntimeError(
+                f"{torch.cuda.get_device_name(self.enhet)} har beräkningsförmåga {kap[0]}.{kap[1]}, "
+                f"men {bygge} har bara {', '.join(arkitekturer)}. Installera ett torch-bygge "
+                "som täcker kortet (för RTX 50-serien: CUDA 12.8 eller senare).")
+
+    def miljo(self):
+        """Versioner och kort som tiderna beror på."""
+        from importlib.metadata import version
+        torch = self.torch
+        m = {"python": platform.python_version(), "plattform": platform.platform(),
+             "torch": torch.__version__, "torch_cuda": torch.version.cuda,
+             "pyannote_audio": version("pyannote.audio")}
+        if self.enhet.type == "cuda":
+            m["kort"] = torch.cuda.get_device_name(self.enhet)
+            m["berakningsformaga"] = "%d.%d" % torch.cuda.get_device_capability(self.enhet)
+            m["cudnn"] = torch.backends.cudnn.version()
+            m["drivrutin"] = drivrutin()
+        return m
 
     def ljudlangd(self, kalla):
         if isinstance(kalla, dict):
@@ -592,6 +688,14 @@ def main(argv):
               "inte på GPU:n. Felsök torch-bygget och drivrutinen först.", file=sys.stderr)
         return 2
 
+    try:
+        omgivning = motor.miljo()
+    except Exception as e:                       # noqa: BLE001 — mätningen är viktigare än metadata
+        omgivning = {"fel": f"{type(e).__name__}: {e}"[:200]}
+    varning = jamforbarhet(omgivning.get("kort"))
+    if varning:
+        print(f"OBS: {varning}", file=sys.stderr, flush=True)
+
     cfg = {"vram_tak_gib": args.vram_tak_gib}
     resultat, bas_hyp = {}, None
 
@@ -607,8 +711,8 @@ def main(argv):
             return
         with open(args.ut, "w", encoding="utf-8") as f:
             json.dump({"motor": motor.namn, "ljud_s": ljud_s, "upprepa": args.upprepa,
-                       "referens": bool(ref), "resultat": resultat,
-                       "ej_i_banken": EJ_I_BANKEN}, f, ensure_ascii=False, indent=1)
+                       "referens": bool(ref), "miljo": omgivning, "jamforbarhet": varning,
+                       "resultat": resultat, "ej_i_banken": EJ_I_BANKEN}, f, ensure_ascii=False, indent=1)
 
     def kor_en(kod, besk, inst, kall=False):
         print(f"… {kod} ({besk})", file=sys.stderr, flush=True)
@@ -639,6 +743,8 @@ def main(argv):
         return 1
 
     print(tabell(resultat))
+    if varning:
+        print(f"\nOBS: {varning}")
     if tolkningsregel(resultat):
         print("\nB är rött och R1–R7 är alla gråa: GPU:n är inte flaskhalsen. Felsök miljön "
               "(torch-bygge, .to(cuda), drivrutin) innan fler parametrar provas.")

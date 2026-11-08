@@ -113,6 +113,26 @@ class Hjalp(unittest.TestCase):
         self.assertEqual(db.kombination(r), {"tf32": True, "batch": 64})
 
 
+class Kort(unittest.TestCase):
+    def test_blackwell_kraver_sm120_eller_ptx(self):
+        self.assertFalse(db.har_karnor((12, 0), ["sm_80", "sm_86", "sm_90"]))
+        self.assertTrue(db.har_karnor((12, 0), ["sm_86", "sm_90", "sm_100", "sm_120", "compute_120"]))
+        self.assertTrue(db.har_karnor((12, 0), ["sm_86", "compute_90"]))          # PTX kompileras av drivrutinen
+        self.assertFalse(db.har_karnor((12, 0), ["sm_90a"]))
+
+    def test_maskinkod_inom_samma_major(self):
+        self.assertTrue(db.har_karnor((8, 9), ["sm_86"]))
+        self.assertFalse(db.har_karnor((8, 6), ["sm_89"]))
+        self.assertTrue(db.har_karnor((8, 6), ["sm_86"]))
+        self.assertTrue(db.har_karnor((12, 0), ["sm_120a"]))
+        self.assertFalse(db.har_karnor((12, 1), ["sm_120a"]))
+
+    def test_jamforbarhet(self):
+        self.assertIsNone(db.jamforbarhet("NVIDIA GeForce RTX 3080"))
+        self.assertIn("RTX 5090", db.jamforbarhet("NVIDIA GeForce RTX 5090"))
+        self.assertIn("ingen känd GPU", db.jamforbarhet(None))
+
+
 class Torrkorning(unittest.TestCase):
     def test_felaktiga_argument_ger_kod_1(self):
         self.assertEqual(kor("--upprepa", "x")[0], 1)
@@ -195,6 +215,33 @@ class Torrkorning(unittest.TestCase):
                                capture_output=True, text=True)
             self.assertEqual(r.returncode, 2)          # 8 % färre turer: rött i experiment 2
             self.assertIn("-8.00 %", r.stdout)
+
+    def test_miljo_sparas_och_3080_ger_ingen_varning(self):
+        kod, text, j = torrkorning()
+        self.assertIn("3080", j["miljo"]["kort"])
+        self.assertIsNone(j["jamforbarhet"])
+        self.assertNotIn("OBS:", text)
+
+    def test_annat_kort_ger_varning_i_json_och_tabell(self):
+        import contextlib
+        import io
+        orig = db.Attrapp.KORT
+        db.Attrapp.KORT = "NVIDIA GeForce RTX 5090"
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                ut = os.path.join(d, "r.json")
+                out, err = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    kod = db.main(["diarbank", "--attrapp", "--upprepa", "1", "--korningar", "R2",
+                                   "--ingen-kombination", "--ut", ut])
+                with open(ut, encoding="utf-8") as f:
+                    j = json.load(f)
+        finally:
+            db.Attrapp.KORT = orig
+        self.assertEqual(kod, 0)
+        self.assertIn("RTX 5090", j["jamforbarhet"])
+        self.assertIn("OBS:", out.getvalue())
+        self.assertIn("OBS:", err.getvalue())
 
     def test_attrappen_laddar_inte_torch(self):
         self.assertNotIn("torch", sys.modules)

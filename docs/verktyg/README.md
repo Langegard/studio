@@ -77,6 +77,10 @@ Den mäter:
 
 **Turparitet:** med `--rttm-katalog d/` sparas varje variants diarisering som `d/<körning>.rttm`. Sedan avgör `python3 diarjamfor.py --ref d/B.rttm --hyp d/R4b.rttm` om ändringen flyttade talarturerna. Spara bara RTTM för testklipp: RTTM från riktigt ljud är husdata.
 
+**Annat kort än RTX 3080:** banden i tabell 4.4 är satta för RTX 3080 (10 GB). På ett annat kort skriver bänken ut en varning, i början och under tabellen, och sparar den i JSON under `jamforbarhet`. B:s och R8:s gränser i gånger realtid går då inte att jämföra. R1–R4 mäts mot B på samma kort, och DER-banden och R3:s minnesgräns gäller som förut. Under `miljo` sparas kortets namn och beräkningsförmåga, drivrutinen (om `pynvml` finns) och versionerna av torch, CUDA-bygget, cuDNN och pyannote. Då går det att se vilket kort som gav siffrorna.
+
+**Torch-bygget kontrolleras före modellen.** Om torch inte ser någon CUDA-enhet, eller om bygget saknar maskinkod och PTX för kortet, stannar bänken med kod 1 och ett fel som säger vad som saknas. CUDA:s eget fel är "no kernel image is available". Det händer till exempel med ett äldre bygge på RTX 50-serien (Blackwell, sm_120), som behöver ett bygge för CUDA 12.8 eller senare.
+
 **Tidsåtgång:** med standardvärdena blir det ungefär 40 körningar. Går ett 9-minutersklipp i referensmätningens takt, cirka 3 minuter per körning, tar bänken ett par timmar. Börja med `--upprepa 1`, eller ett urval med `--korningar B,R2,R4b`.
 
 **Avslutningskod:**
