@@ -91,6 +91,32 @@ class Band(unittest.TestCase):
             self.assertEqual(ab.band(6, [s, m])[0], vantat, rtf)
 
 
+class Blackwell(unittest.TestCase):
+    def test_tips_for_kanda_fel(self):
+        self.assertIn("4.7.0", ab.tips("RuntimeError: cuBLAS failed with status CUBLAS_STATUS_NOT_SUPPORTED"))
+        self.assertIn("12.0", ab.tips("ValueError: Requested int8 compute type, but the target device "
+                                      "or backend do not support efficient int8 computation."))
+        self.assertIn("nvidia-cublas-cu12", ab.tips("RuntimeError: Library libcublas.so.12 is not found "
+                                                    "or cannot be loaded"))
+        self.assertIn("4.7.0", ab.tips("ValueError: ctranslate2 4.6.3 anger att int8 inte stöds på kortet "
+                                       "(stöds: bfloat16, float16, float32)"))
+        self.assertEqual(ab.tips("RuntimeError: något annat"), "")
+
+    def test_stods(self):
+        stodda = {"float32", "float16", "int8_float16"}
+        self.assertTrue(ab.stods("float16", stodda))
+        self.assertFalse(ab.stods("int8", stodda))
+        self.assertTrue(ab.stods("auto", set()))
+
+    def test_utan_cublas_paket_forladdas_inget(self):
+        self.assertIsNone(ab.forladda_cublas12())
+
+    def test_fallen_variant_ar_omatt_med_tips(self):
+        r = ab.fallen("large:int8:cuda", 3, "ValueError: Requested int8 compute type")
+        self.assertEqual((r["modell"], r["wer"], r["rtf"]), ("KBLab/kb-whisper-large", None, None))
+        self.assertIn("4.7.0", r["tips"])
+
+
 class Manifest(unittest.TestCase):
     def test_relativa_sokvagar_och_kommentarer(self):
         with tempfile.TemporaryDirectory() as d:
@@ -126,6 +152,53 @@ class Torrkorning(unittest.TestCase):
         kod, text, _ = kor("--attrapp", "--experiment", "6")
         self.assertEqual(kod, 0)
         self.assertIn("**GRÅTT**: medium RTF 0.70", text)
+
+    def test_en_variant_som_faller_stoppar_inte_bänken(self):
+        import contextlib
+        import io
+        orig = ab.Attrapp.__init__
+
+        def init(self, modell, prec, enhet, tradar):
+            if prec == "int8":
+                raise ValueError("Requested int8 compute type, but the target device or backend "
+                                 "do not support efficient int8 computation.")
+            orig(self, modell, prec, enhet, tradar)
+        ab.Attrapp.__init__ = init
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                ut = os.path.join(d, "r.json")
+                out, err = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    kod = ab.main(["asrbank", "--attrapp", "--experiment", "5", "--ut", ut])
+                with open(ut, encoding="utf-8") as f:
+                    j = json.load(f)
+        finally:
+            ab.Attrapp.__init__ = orig
+        self.assertEqual(kod, 0)
+        self.assertEqual(j["band"], ab.OMATT)
+        fp16, int8 = j["resultat"]
+        self.assertIsNotNone(fp16["wer"])
+        self.assertIsNone(int8["wer"])
+        self.assertIn("4.7.0", int8["tips"])
+        self.assertIn("Tips:", out.getvalue())
+        self.assertIn("| large:int8:cuda | OMÄTT | OMÄTT | OMÄTT | OMÄTT |", out.getvalue())
+
+    def test_alla_varianter_faller_ger_kod_1(self):
+        import contextlib
+        import io
+        orig = ab.Attrapp.__init__
+
+        def init(self, *a):
+            raise RuntimeError("Library libcublas.so.12 is not found or cannot be loaded")
+        ab.Attrapp.__init__ = init
+        try:
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                kod = ab.main(["asrbank", "--attrapp", "--experiment", "5"])
+        finally:
+            ab.Attrapp.__init__ = orig
+        self.assertEqual(kod, 1)
+        self.assertIn("nvidia-cublas-cu12", err.getvalue())
 
     def test_felaktiga_argument_ger_kod_1(self):
         self.assertEqual(kor("--experiment", "9")[0], 1)

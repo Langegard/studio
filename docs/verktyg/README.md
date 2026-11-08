@@ -126,7 +126,8 @@ Prov: 21 st i `prov/test_diarjamfor.py`. De kräver inga beroenden.
 ## asrbank
 
 ```
-pip install faster-whisper pynvml                      # pynvml bara för grafikminnet
+pip install "faster-whisper==1.2.1" "ctranslate2>=4.7" pynvml   # pynvml för grafikminne och kort
+pip install "nvidia-cublas-cu12==12.8.4.1"                        # bara för GPU; förladdas av asrbank
 python3 asrbank.py --manifest fleurs-sv-test.tsv --experiment 5            # large fp16 mot int8 på GPU
 python3 asrbank.py --manifest egna.tsv --experiment 6 --tradar 4           # small mot medium på CPU
 python3 asrbank.py --manifest m.tsv --varianter large:float16:cuda,large:int8_float16:cuda
@@ -156,7 +157,14 @@ python3 asrbank.py --manifest m.tsv --varianter large:float16:cuda,large:int8_fl
 - den första CUDA-varianten skapar CUDA-kontexten, och kontexten ligger kvar. Jämför därför toppvärdena, inte skillnaden mellan topp och baslinje;
 - blir OMÄTT utan pynvml.
 
-**JSON-filen** loggar versioner och miljö: Python, faster-whisper, CTranslate2, plattform, processor, trådar och effektiv precision. Utredningen kräver att versionerna loggas.
+**JSON-filen** loggar versioner och miljö: Python, faster-whisper, CTranslate2, plattform, processor, trådar och effektiv precision. Utredningen kräver att versionerna loggas. Med GPU-varianter sparas också kortet, beräkningsförmågan och drivrutinen (via `pynvml`), vilka precisioner CTranslate2 anger som stödda på kortet och vilken cuBLAS som förladdades.
+
+**En variant som faller stoppar inte bänken.** Dess mått blir OMÄTT, och felet sparas i tabellen och i JSON, för kända fel med ett tips. Bänken avslutas med kod 1 bara när alla varianter föll. Före varje GPU-variant kontrolleras att CTranslate2 anger precisionen som stödd, så att felet kommer innan modellen laddas.
+
+**RTX 50-serien (Blackwell, beräkningsförmåga 12.0).** Kontrollerat mot PyPI-hjulen och CTranslate2:s källkod, inte kört på kortet:
+- Inget CTranslate2-hjul har maskinkod för sm_120, bara PTX för compute_86. Drivrutinen (R570 eller senare) kompilerar den vid första körningen. Den kastade uppvärmningen tar den tiden, så den hamnar inte i RTF. Sätt inte `CUDA_CACHE_DISABLE`.
+- int8 kräver ctranslate2 4.7.0 eller senare. 4.6.1 och äldre ger `CUBLAS_STATUS_NOT_SUPPORTED`, och 4.6.2–4.6.3 stänger av int8 på 12.0. int8 på sm_120 är bekräftat på RTX 5060 Ti, inte på 5090.
+- CTranslate2 laddar cuBLAS för CUDA 12 (`libcublas.so.12`) själv och behöver ingen cuDNN sedan 4.6.3. Installera `nvidia-cublas-cu12==12.8.4.1` i samma miljö: dess bibliotek har maskinkod för sm_120, och asrbank förladdar dem, så att ingen `LD_LIBRARY_PATH` behövs. torch 2.11 och senare har cuBLAS för CUDA 13, som CTranslate2 inte använder. Ha därför asrbank och diarbank i var sin miljö, eller lås torch till 2.10.
 
 **Band (utredningens avsnitt 7):**
 - **Experiment 5:** ΔWER(int8 − fp16) ≤ 0,3 procentenheter ger GRÖNT, 0,3–1,0 GRÅTT och över 1,0 RÖTT, och då är fp16 obligatoriskt på GPU.
@@ -165,7 +173,7 @@ python3 asrbank.py --manifest m.tsv --varianter large:float16:cuda,large:int8_fl
 
 Bänken sparar inga transkript. **Läge:** provad mot en attrapp, **inte körd med riktiga modeller än (OMÄTT)**. API-anropen följer faster-whisper 1.2.1.
 
-Prov: 20 st i `prov/test_asrbank.py`. De kräver inga beroenden.
+Prov: 26 st i `prov/test_asrbank.py`. De kräver inga beroenden.
 
 ## cpwer
 

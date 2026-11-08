@@ -34,8 +34,23 @@ Band (utredningens tröskelvärden):
 Mät bara på grönt ljud, till exempel FLEURS sv_se test (CC BY 4.0) eller
 påhittade inspelningar. Bänken sparar inga transkript, bara tal.
 
-Avslutningskod: 0 = klart (även när bandet blir OMÄTT), 1 = fel, även
-felaktiga argument.
+En variant som faller stoppar inte bänken. Den får sitt fel och, för kända
+fel, ett tips i tabellen och i JSON, och dess mått blir OMÄTT. Kända fel på
+RTX 50-serien (Blackwell, beräkningsförmåga 12.0) i CTranslate2:
+    int8 i 4.6.1 och äldre: "cuBLAS failed with status CUBLAS_STATUS_NOT_SUPPORTED";
+    int8 i 4.6.2 och 4.6.3: avstängt för 12.0 ("Requested int8 compute type");
+    4.7.0 och senare: int8 påslaget igen, med matriser utfyllda till 16.
+Inget CTranslate2-hjul har maskinkod för sm_120; drivrutinen kompilerar dess
+PTX (compute_86) vid första körningen, och den kastade uppvärmningen tar den
+tiden. CTranslate2 laddar cuBLAS för CUDA 12 (libcublas.so.12) själv. Finns
+pip-paketet nvidia-cublas-cu12 i miljön förladdas det, så att ingen
+LD_LIBRARY_PATH behövs. Före varje GPU-variant kontrolleras att CTranslate2
+anger precisionen som stödd på kortet. Under miljo sparas kortet,
+beräkningsförmågan, drivrutinen, CTranslate2:s stödda precisioner och vilken
+cuBLAS som förladdades.
+
+Avslutningskod: 0 = klart (även när bandet blir OMÄTT eller en variant föll),
+1 = fel, även felaktiga argument och när alla varianter föll.
 """
 import argparse
 import json
@@ -142,6 +157,25 @@ def band(experiment, resultat):
     return OMATT, "inget band för detta experiment"
 
 
+def tips(fel):
+    """Ett tips för kända fel, annars tom sträng."""
+    if "CUBLAS_STATUS_NOT_SUPPORTED" in fel:
+        return ("känt int8-fel på RTX 50-serien i ctranslate2 4.6.1 och äldre; "
+                "använd ctranslate2 4.7.0 eller senare")
+    if "Requested int8" in fel or ("int8" in fel and "inte stöds" in fel):
+        return ("på RTX 50-serien (beräkningsförmåga 12.0) stänger ctranslate2 4.6.2 och 4.6.3 "
+                "av int8; använd 4.7.0 eller senare")
+    if "libcublas.so" in fel:
+        return ("CTranslate2 hittar inte cuBLAS för CUDA 12; installera nvidia-cublas-cu12 "
+                "(12.8 eller senare för RTX 50-serien) i samma miljö, så förladdar asrbank den")
+    return ""
+
+
+def stods(prec, stodda):
+    """Anger CTranslate2 precisionen som stödd? auto och default väljer själva."""
+    return prec in ("auto", "default") or prec in stodda
+
+
 def las_manifest(sokvag):
     """TSV: ljudfil<TAB>referens. Ger [(absolut sökväg, referens)]."""
     bas = os.path.dirname(os.path.abspath(sokvag))
@@ -180,11 +214,65 @@ class Attrapp:
         return " ".join(ord_), 10.0 * self.RTF.get(self.nyckel, 1.0), 10.0
 
 
+_CUBLAS12 = []      # sökvägen till förladdad libcublas.so.12, om någon
+
+
+def forladda_cublas12():
+    """Ladda libcublas.so.12 ur pip-paketet nvidia-cublas-cu12, om det finns.
+
+    CTranslate2 öppnar "libcublas.so.12" med dlopen när den behövs. Är ett
+    bibliotek med det sonamnet redan laddat används det, och då behövs ingen
+    LD_LIBRARY_PATH. Ger sökvägen eller None.
+    """
+    if _CUBLAS12:
+        return _CUBLAS12[0]
+    try:
+        import ctypes
+        import importlib.util
+        spec = importlib.util.find_spec("nvidia.cublas")
+        for bas in (spec.submodule_search_locations or []) if spec else []:
+            lib = os.path.join(bas, "lib")
+            if os.path.exists(os.path.join(lib, "libcublas.so.12")):
+                for namn in ("libcublasLt.so.12", "libcublas.so.12"):
+                    ctypes.CDLL(os.path.join(lib, namn), mode=ctypes.RTLD_GLOBAL)
+                _CUBLAS12.append(os.path.join(lib, "libcublas.so.12"))
+                return _CUBLAS12[0]
+    except Exception:                            # noqa: BLE001 — då får CTranslate2 leta själv
+        pass
+    return None
+
+
+def gpu_info():
+    """Kort, beräkningsförmåga och drivrutin via pynvml (första synliga kortet), annars {}."""
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        try:
+            synliga = os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",")[0].strip()
+            h = (pynvml.nvmlDeviceGetHandleByUUID(synliga) if synliga.startswith("GPU-")
+                 else pynvml.nvmlDeviceGetHandleByIndex(int(synliga)))
+            text = (lambda v: v.decode() if isinstance(v, bytes) else v)
+            maj, mi = pynvml.nvmlDeviceGetCudaComputeCapability(h)
+            return {"kort": text(pynvml.nvmlDeviceGetName(h)), "berakningsformaga": f"{maj}.{mi}",
+                    "drivrutin": text(pynvml.nvmlSystemGetDriverVersion())}
+        finally:
+            pynvml.nvmlShutdown()
+    except Exception:                            # noqa: BLE001 — utan pynvml blir det okänt
+        return {}
+
+
 class FasterWhisper:
     """Riktig motor: faster-whisper (CTranslate2) med KB-Whisper."""
     namn = "faster-whisper"
 
     def __init__(self, modell, prec, enhet, tradar):
+        if enhet == "cuda":
+            forladda_cublas12()
+            import ctranslate2
+            stodda = ctranslate2.get_supported_compute_types("cuda")
+            if not stods(prec, stodda):
+                raise ValueError(f"ctranslate2 {ctranslate2.__version__} anger att {prec} inte stöds "
+                                 f"på kortet (stöds: {', '.join(sorted(stodda))})")
         from faster_whisper import WhisperModel
         self.m = WhisperModel(modell, device=enhet, compute_type=prec, cpu_threads=tradar)
         self.effektiv_precision = getattr(self.m.model, "compute_type", None)
@@ -288,7 +376,7 @@ def kor_variant(Motor, variant, filer, args):
             "kort": getattr(minne, "kort", None)}
 
 
-def miljo(Motor, args):
+def miljo(Motor, args, cuda=False):
     """Versioner och inställningar som RTF och WER beror på (utredningen: logga versioner)."""
     m = {"python": platform.python_version(), "plattform": platform.platform(),
          "processor": platform.processor() or platform.machine(),
@@ -298,7 +386,25 @@ def miljo(Motor, args):
         import faster_whisper
         m["faster_whisper"] = faster_whisper.__version__
         m["ctranslate2"] = ctranslate2.__version__
+        if cuda:
+            m["cublas12_forladdad"] = forladda_cublas12()
+            m.update(gpu_info())
+            try:
+                m["ct2_cuda_enheter"] = ctranslate2.get_cuda_device_count()
+                if m["ct2_cuda_enheter"]:
+                    m["ct2_precisioner_cuda"] = sorted(ctranslate2.get_supported_compute_types("cuda"))
+            except Exception as e:               # noqa: BLE001 — varianterna visar felet
+                m["ct2_fel"] = f"{type(e).__name__}: {e}"[:200]
     return m
+
+
+def fallen(variant, antal, fel):
+    """Resultatrad för en variant som föll: måtten blir OMÄTT, felet och ett tips sparas."""
+    modell, prec, enhet = tolka_variant(variant)
+    return {"variant": variant, "modell": modell, "precision": prec, "effektiv_precision": None,
+            "enhet": enhet, "filer": antal, "ljud_s": None, "laddning_s": None, "wer": None,
+            "rtf": None, "vram_bas_gib": None, "vram_topp_gib": None, "kort": None,
+            "fel": fel[:300], "tips": tips(fel)}
 
 
 class Tolk(argparse.ArgumentParser):
@@ -336,22 +442,39 @@ def main(argv):
             saknas = [f for f, _ in filer if not os.path.exists(f)]
             if saknas:
                 raise ValueError(f"{len(saknas)} ljudfiler saknas, t.ex. {saknas[0]}")
-        resultat = [kor_variant(Motor, v, filer, args) for v in varianter]
-        omgivning = miljo(Motor, args)
+        omgivning = miljo(Motor, args, cuda=any(tolka_variant(v)[2] == "cuda" for v in varianter))
     except Exception as e:                       # noqa: BLE001 — skrivs ut, aldrig tyst
         print(f"fel: {type(e).__name__}: {e}", file=sys.stderr)
         return 1
 
+    resultat = []
+    for v in varianter:
+        try:
+            resultat.append(kor_variant(Motor, v, filer, args))
+        except Exception as e:                   # noqa: BLE001 — varianten blir OMÄTT, bänken fortsätter
+            r = fallen(v, len(filer), f"{type(e).__name__}: {e}")
+            print(f"   {v} föll: {r['fel']}" + (f"\n   tips: {r['tips']}" if r["tips"] else ""),
+                  file=sys.stderr, flush=True)
+            resultat.append(r)
+    if all(r.get("fel") for r in resultat):
+        print("fel: alla varianter föll", file=sys.stderr)
+        return 1
+
     utfall, skal = band(args.experiment, resultat)
-    print(f"Experiment {args.experiment}: {len(filer)} filer, {resultat[0]['ljud_s']:.0f} s ljud")
+    ljud_s = next(r["ljud_s"] for r in resultat if r["ljud_s"] is not None)
+    print(f"Experiment {args.experiment}: {len(filer)} filer, {ljud_s:.0f} s ljud")
     print("| Variant | Effektiv precision | WER % | RTF | Laddning s | VRAM topp (bas) |")
     print("|---|---|---|---|---|---|")
     for r in resultat:
         print("| {} | {} | {} | {} | {} | {} |".format(
             r["variant"], r["effektiv_precision"] or OMATT,
             OMATT if r["wer"] is None else f"{r['wer']:.2f}",
-            OMATT if r["rtf"] is None else f"{r['rtf']:.3f}", r["laddning_s"],
+            OMATT if r["rtf"] is None else f"{r['rtf']:.3f}",
+            OMATT if r["laddning_s"] is None else r["laddning_s"],
             OMATT if r["vram_topp_gib"] is None else f"{r['vram_topp_gib']} GiB ({r['vram_bas_gib']})"))
+    for r in resultat:
+        if r.get("fel"):
+            print(f"\n{r['variant']} föll: {r['fel']}" + (f"\nTips: {r['tips']}" if r["tips"] else ""))
     print(f"\n**{utfall}**: {skal}")
     if args.ut:
         try:
