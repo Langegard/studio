@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<UsbTreeViewReport computername="PROV">
+<node text="PROV" type="2">
+<text>prov</text>
+<node text="Värdkontroller" type="3">
+<text>x</text>
+<node text="USB Root Hub (USB 3.0)" type="4">
+<text>y</text>
+<node text="[Port2] : Hubb" icon="16" type="6" speed="2">
+<text>
+Connection Status        : 0x01 (Device is connected)&#xD;&#xA;Port Chain               : 1-2&#xD;&#xA;idVendor                 : 0x05E3 (Genesys Logic, Inc.)&#xD;&#xA;idProduct                : 0x0610&#xD;&#xA;</text>
+<node text="[Port3] : Hubb" icon="16" type="6" speed="2">
+<text>
+Connection Status        : 0x01 (Device is connected)&#xD;&#xA;Port Chain               : 1-2-3&#xD;&#xA;idVendor                 : 0x1A40 (TERMINUS TECHNOLOGY INC.)&#xD;&#xA;idProduct                : 0x0101&#xD;&#xA;</text>
+</node>
+</node>
+</node></node></node>
+</UsbTreeViewReport>

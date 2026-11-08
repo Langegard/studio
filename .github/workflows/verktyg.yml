@@ -1,0 +1,37 @@
+name: Verktyg
+
+# shellcheck på skalskripten och enhetsprov för usbdjup när docs/verktyg ändras.
+
+on:
+  push:
+    paths:
+      - "docs/verktyg/**"
+      - ".github/workflows/verktyg.yml"
+  pull_request:
+    paths:
+      - "docs/verktyg/**"
+      - ".github/workflows/verktyg.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verktyg:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: shellcheck -S warning docs/verktyg/*.sh
+
+      - name: Bandregeln — inga användarsökvägar i verktygen
+        run: |
+          if grep -rnIE '[A-Za-z]:\\Users\\|/home/[a-z]|/Users/[A-Za-z]' docs/verktyg; then
+            echo "Användarsökväg hittad i docs/verktyg — verktygen ska vara generiska." >&2
+            exit 1
+          fi
+
+      - name: usbdjup-prov
+        run: python3 -m unittest discover -s docs/verktyg/prov -v
