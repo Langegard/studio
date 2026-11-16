@@ -1,0 +1,48 @@
+name: Fenestra-prov
+
+# Kör acceptansproven A–I och mutationskontrollen när Fenestra ändras.
+# OMÄTT räknas inte som godkänt: steget kräver "0 rött · 0 omätt".
+
+on:
+  push:
+    paths:
+      - "docs/fenestra/**"
+      - ".github/workflows/fenestra-prov.yml"
+  pull_request:
+    paths:
+      - "docs/fenestra/**"
+      - ".github/workflows/fenestra-prov.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prov:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: docs/fenestra/prov
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: docs/fenestra/prov/package-lock.json
+
+      - name: Installera
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Prov A–I
+        run: |
+          set -o pipefail
+          npm run -s prov | tee utfall.txt
+          grep -q '· 0 rött · 0 omätt' utfall.txt
+
+      - name: Mutationskontroll
+        run: npm run -s mutation

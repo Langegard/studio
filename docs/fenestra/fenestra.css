@@ -1,0 +1,79 @@
+/* Fenestra: läsyta för telefon. Inga externa resurser; systemtypsnitt. */
+:root {
+  --botten: #0B0E12;
+  --panel: #131922;
+  --upphojd: #1A2230;
+  --text: #E6EDF3;
+  --dampad: #9AA4B2;
+  --guld: #C8A951;
+  --barnsten: #E8842C;
+  --fosfor: #5BC46B;
+  --cyan: #63D2E8;
+  --mal: 44px;
+  --radavstand: 1.55;
+  --textskala: 1;
+  --stil: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html { background: var(--botten); color: var(--text); font-family: var(--stil); -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  min-height: 100dvh;
+  font-size: calc(17px * var(--textskala));
+  line-height: var(--radavstand);
+  padding: 0 16px calc(24px + env(safe-area-inset-bottom));
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+}
+
+.topp {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 0 -16px; padding: env(safe-area-inset-top) 16px 0;
+  background: var(--panel);
+  border-bottom: 1px solid var(--upphojd);
+}
+.hem { color: var(--guld); text-decoration: none; font-weight: 600; letter-spacing: .02em; }
+.verktyg { display: flex; gap: 8px; }
+.verktyg button {
+  background: var(--upphojd); color: var(--text); border: 1px solid var(--dampad);
+  border-radius: 8px; font: inherit; font-size: 16px; cursor: pointer;
+}
+
+.mal { display: inline-flex; align-items: center; min-height: var(--mal); min-width: var(--mal); padding: 0 12px; }
+
+main { max-width: 42rem; margin: 0 auto; }
+h1, h2, h3, h4 { line-height: 1.25; margin: 1.2em 0 .4em; font-weight: 650; }
+h1 { font-size: 1.6em; color: var(--text); }
+h2 { font-size: 1.3em; color: var(--cyan); }
+h3 { font-size: 1.12em; color: var(--guld); }
+h4 { font-size: 1em; color: var(--dampad); text-transform: uppercase; letter-spacing: .04em; }
+p { margin: 0 0 .9em; }
+ul, ol { padding-left: 1.4em; margin: 0 0 .9em; }
+li { margin: .25em 0; }
+a { color: var(--cyan); }
+.dampad { color: var(--dampad); }
+.brodsmula { font-size: .9em; margin-top: 1em; }
+
+.lista { list-style: none; padding: 0; margin: 0; }
+.lista li + li { border-top: 1px solid var(--upphojd); }
+.post { width: 100%; justify-content: space-between; color: var(--text); text-decoration: none; padding: 10px 4px; }
+.post:active { background: var(--upphojd); }
+.tagg { color: var(--barnsten); font-size: .85em; border: 1px solid var(--barnsten); border-radius: 999px; padding: 0 8px; }
+.tomt { color: var(--dampad); padding: 12px 4px; }
+
+.filter { margin: 8px 0 12px; display: flex; flex-direction: column; gap: 4px; }
+.filter label { font-size: .9em; }
+input, textarea, select {
+  font: inherit; font-size: 16px; color: var(--text); background: var(--panel);
+  border: 1px solid var(--dampad); border-radius: 10px; min-height: var(--mal); padding: 0 12px; width: 100%;
+}
+@media (pointer: coarse) { input, textarea, select { font-size: 16px; } }
+
+.ljud { margin-top: 2em; padding: 12px; background: var(--panel); border-radius: 12px; }
+.ljud h2 { margin: 0 0 8px; font-size: 1em; }
+audio { width: 100%; min-height: var(--mal); }
+
+:focus-visible { outline: 3px solid var(--fosfor); outline-offset: 2px; }
+img, video, table, pre { max-width: 100%; }

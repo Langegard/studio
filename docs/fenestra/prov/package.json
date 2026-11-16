@@ -1,0 +1,12 @@
+{
+  "name": "fenestra-prov",
+  "private": true,
+  "description": "Acceptansprov A–I för Fenestra. Tre utfall: GRÖNT, RÖTT, OMÄTT.",
+  "scripts": {
+    "prov": "playwright test --reporter=./utfall-reporter.js",
+    "mutation": "bash ./mutation.sh"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}
