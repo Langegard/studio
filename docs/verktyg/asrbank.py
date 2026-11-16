@@ -46,8 +46,8 @@ tiden. CTranslate2 laddar cuBLAS för CUDA 12 (libcublas.so.12) själv. Finns
 pip-paketet nvidia-cublas-cu12 i miljön förladdas det, så att ingen
 LD_LIBRARY_PATH behövs. Före varje GPU-variant kontrolleras att CTranslate2
 anger precisionen som stödd på kortet. Under miljo sparas kortet,
-beräkningsförmågan, drivrutinen, CTranslate2:s stödda precisioner och vilken
-cuBLAS som förladdades.
+beräkningsförmågan, drivrutinen, effekttaket, CTranslate2:s stödda precisioner
+och vilken cuBLAS som förladdades.
 
 Avslutningskod: 0 = klart (även när bandet blir OMÄTT eller en variant föll),
 1 = fel, även felaktiga argument och när alla varianter föll.
@@ -243,7 +243,7 @@ def forladda_cublas12():
 
 
 def gpu_info():
-    """Kort, beräkningsförmåga och drivrutin via pynvml (första synliga kortet), annars {}."""
+    """Kort, beräkningsförmåga, drivrutin och effekttak (W) via pynvml för första synliga kortet, annars {}."""
     try:
         import pynvml
         pynvml.nvmlInit()
@@ -253,8 +253,13 @@ def gpu_info():
                  else pynvml.nvmlDeviceGetHandleByIndex(int(synliga)))
             text = (lambda v: v.decode() if isinstance(v, bytes) else v)
             maj, mi = pynvml.nvmlDeviceGetCudaComputeCapability(h)
-            return {"kort": text(pynvml.nvmlDeviceGetName(h)), "berakningsformaga": f"{maj}.{mi}",
-                    "drivrutin": text(pynvml.nvmlSystemGetDriverVersion())}
+            m = {"kort": text(pynvml.nvmlDeviceGetName(h)), "berakningsformaga": f"{maj}.{mi}",
+                 "drivrutin": text(pynvml.nvmlSystemGetDriverVersion())}
+            try:                                 # ett kapat kort ger högre RTF
+                m["effekttak_w"] = round(pynvml.nvmlDeviceGetEnforcedPowerLimit(h) / 1000)
+            except Exception:                    # noqa: BLE001
+                pass
+            return m
         finally:
             pynvml.nvmlShutdown()
     except Exception:                            # noqa: BLE001 — utan pynvml blir det okänt

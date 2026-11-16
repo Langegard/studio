@@ -108,6 +108,28 @@ class Blackwell(unittest.TestCase):
         self.assertFalse(ab.stods("int8", stodda))
         self.assertTrue(ab.stods("auto", set()))
 
+    def test_gpu_info_med_effekttak(self):
+        class Falsk:
+            def nvmlInit(self): pass
+            def nvmlShutdown(self): pass
+            def nvmlDeviceGetHandleByIndex(self, i): return i
+            def nvmlDeviceGetName(self, h): return b"NVIDIA GeForce RTX 5090"
+            def nvmlDeviceGetCudaComputeCapability(self, h): return (12, 0)
+            def nvmlSystemGetDriverVersion(self): return "580.95.05"
+            def nvmlDeviceGetEnforcedPowerLimit(self, h): return 450000
+        forr, synliga = sys.modules.get("pynvml"), os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+        sys.modules["pynvml"] = Falsk()
+        try:
+            self.assertEqual(ab.gpu_info(), {"kort": "NVIDIA GeForce RTX 5090", "berakningsformaga": "12.0",
+                                             "drivrutin": "580.95.05", "effekttak_w": 450})
+        finally:
+            if forr is None:
+                sys.modules.pop("pynvml", None)
+            else:
+                sys.modules["pynvml"] = forr
+            if synliga is not None:
+                os.environ["CUDA_VISIBLE_DEVICES"] = synliga
+
     def test_utan_cublas_paket_forladdas_inget(self):
         self.assertIsNone(ab.forladda_cublas12())
 

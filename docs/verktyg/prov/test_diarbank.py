@@ -133,6 +133,65 @@ class Kort(unittest.TestCase):
         self.assertIn("ingen känd GPU", db.jamforbarhet(None))
 
 
+class FalskNvml:
+    """Låtsad pynvml: kort 0 har taket 575 W, kort 1 är kapat till 450 W."""
+    TAK = {0: 575000, 1: 450000}
+
+    def __init__(self):
+        self.stangd = False
+
+    def nvmlInit(self):
+        pass
+
+    def nvmlShutdown(self):
+        self.stangd = True
+
+    def nvmlSystemGetDriverVersion(self):
+        return b"580.95.05"
+
+    def nvmlDeviceGetHandleByIndex(self, i):
+        return i
+
+    def nvmlDeviceGetHandleByUUID(self, u):
+        return 1
+
+    def nvmlDeviceGetEnforcedPowerLimit(self, h):
+        return self.TAK[h]
+
+
+class Nvml(unittest.TestCase):
+    def setUp(self):
+        self.falsk = FalskNvml()
+        self.forr = sys.modules.get("pynvml")
+        self.synliga = os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+        sys.modules["pynvml"] = self.falsk
+
+    def tearDown(self):
+        if self.forr is None:
+            sys.modules.pop("pynvml", None)
+        else:
+            sys.modules["pynvml"] = self.forr
+        os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+        if self.synliga is not None:
+            os.environ["CUDA_VISIBLE_DEVICES"] = self.synliga
+
+    def test_drivrutin_och_effekttak(self):
+        self.assertEqual(db.nvml_info(0), {"drivrutin": "580.95.05", "effekttak_w": 575})
+        self.assertTrue(self.falsk.stangd)
+
+    def test_synliga_kort_styr_vilket_tak_som_lases(self):
+        os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+        self.assertEqual(db.nvml_info(0)["effekttak_w"], 450)
+        os.environ["CUDA_VISIBLE_DEVICES"] = "GPU-abc"
+        self.assertEqual(db.nvml_info(0)["effekttak_w"], 450)
+        os.environ["CUDA_VISIBLE_DEVICES"] = "MIG-xyz"
+        self.assertEqual(db.nvml_info(0), {"drivrutin": "580.95.05"})
+
+    def test_utan_pynvml_blir_det_tomt(self):
+        sys.modules["pynvml"] = None                  # import ger ImportError
+        self.assertEqual(db.nvml_info(0), {})
+
+
 class Torrkorning(unittest.TestCase):
     def test_felaktiga_argument_ger_kod_1(self):
         self.assertEqual(kor("--upprepa", "x")[0], 1)

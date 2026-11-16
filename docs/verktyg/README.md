@@ -77,7 +77,7 @@ Den mäter:
 
 **Turparitet:** med `--rttm-katalog d/` sparas varje variants diarisering som `d/<körning>.rttm`. Sedan avgör `python3 diarjamfor.py --ref d/B.rttm --hyp d/R4b.rttm` om ändringen flyttade talarturerna. Spara bara RTTM för testklipp: RTTM från riktigt ljud är husdata.
 
-**Annat kort än RTX 3080:** banden i tabell 4.4 är satta för RTX 3080 (10 GB). På ett annat kort skriver bänken ut en varning, i början och under tabellen, och sparar den i JSON under `jamforbarhet`. B:s och R8:s gränser i gånger realtid går då inte att jämföra. R1–R4 mäts mot B på samma kort, och DER-banden och R3:s minnesgräns gäller som förut. Under `miljo` sparas kortets namn och beräkningsförmåga, drivrutinen (om `pynvml` finns) och versionerna av torch, CUDA-bygget, cuDNN och pyannote. Då går det att se vilket kort som gav siffrorna.
+**Annat kort än RTX 3080:** banden i tabell 4.4 är satta för RTX 3080 (10 GB). På ett annat kort skriver bänken ut en varning, i början och under tabellen, och sparar den i JSON under `jamforbarhet`. B:s och R8:s gränser i gånger realtid går då inte att jämföra. R1–R4 mäts mot B på samma kort, och DER-banden och R3:s minnesgräns gäller som förut. Under `miljo` sparas kortets namn och beräkningsförmåga, drivrutinen och effekttaket i W (om `pynvml` finns) och versionerna av torch, CUDA-bygget, cuDNN och pyannote. Då går det att se vilket kort som gav siffrorna. Ett kort som kapats med `nvidia-smi -pl` ger lägre RTFx, så taket måste stå bredvid farten.
 
 **Torch-bygget kontrolleras före modellen.** Om torch inte ser någon CUDA-enhet, eller om bygget saknar maskinkod och PTX för kortet, stannar bänken med kod 1 och ett fel som säger vad som saknas. CUDA:s eget fel är "no kernel image is available". Det händer till exempel med ett äldre bygge på RTX 50-serien (Blackwell, sm_120), som behöver ett bygge för CUDA 12.8 eller senare. Torch-hjulen på PyPI för Linux har sm_120 från 2.8.0 till 2.15.0, men inte 2.7.x. Från 2.11 är de byggda för CUDA 13 och kräver en drivrutin med motsvarande stöd: nvidia-smi:s rad "CUDA Version" ska vara minst lika hög som `torch.version.cuda`.
 
@@ -157,7 +157,7 @@ python3 asrbank.py --manifest m.tsv --varianter large:float16:cuda,large:int8_fl
 - den första CUDA-varianten skapar CUDA-kontexten, och kontexten ligger kvar. Jämför därför toppvärdena, inte skillnaden mellan topp och baslinje;
 - blir OMÄTT utan pynvml.
 
-**JSON-filen** loggar versioner och miljö: Python, faster-whisper, CTranslate2, plattform, processor, trådar och effektiv precision. Utredningen kräver att versionerna loggas. Med GPU-varianter sparas också kortet, beräkningsförmågan och drivrutinen (via `pynvml`), vilka precisioner CTranslate2 anger som stödda på kortet och vilken cuBLAS som förladdades.
+**JSON-filen** loggar versioner och miljö: Python, faster-whisper, CTranslate2, plattform, processor, trådar och effektiv precision. Utredningen kräver att versionerna loggas. Med GPU-varianter sparas också kortet, beräkningsförmågan, drivrutinen och effekttaket (via `pynvml`), vilka precisioner CTranslate2 anger som stödda på kortet och vilken cuBLAS som förladdades.
 
 **En variant som faller stoppar inte bänken.** Dess mått blir OMÄTT, och felet sparas i tabellen och i JSON, för kända fel med ett tips. Bänken avslutas med kod 1 bara när alla varianter föll. Före varje GPU-variant kontrolleras att CTranslate2 anger precisionen som stödd, så att felet kommer innan modellen laddas.
 
@@ -173,7 +173,7 @@ python3 asrbank.py --manifest m.tsv --varianter large:float16:cuda,large:int8_fl
 
 Bänken sparar inga transkript. **Läge:** provad mot en attrapp, **inte körd med riktiga modeller än (OMÄTT)**. API-anropen följer faster-whisper 1.2.1.
 
-Prov: 26 st i `prov/test_asrbank.py`. De kräver inga beroenden.
+Prov: 27 st i `prov/test_asrbank.py`. De kräver inga beroenden.
 
 ## cpwer
 

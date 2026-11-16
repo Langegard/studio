@@ -37,8 +37,8 @@ Banden i tabell 4.4 är satta för RTX 3080 (10 GB). På ett annat kort skriver
 bänken ut en varning och sparar den i JSON (jamforbarhet): B:s och R8:s
 gränser i gånger realtid är då inte jämförbara, men R1–R4 mäts mot B på samma
 kort, och DER-banden och R3:s minnesgräns gäller fortfarande. Kortets namn,
-beräkningsförmåga, drivrutin och versionerna av torch och pyannote sparas
-under miljo. Saknar torch-bygget maskinkod för kortet (till exempel ett äldre
+beräkningsförmåga, drivrutin, effekttak (ett kapat kort ger lägre RTFx) och
+versionerna av torch och pyannote sparas under miljo. Saknar torch-bygget maskinkod för kortet (till exempel ett äldre
 bygge på ett Blackwell-kort, sm_120) stannar bänken före första körningen med
 ett tydligt fel i stället för CUDA:s "no kernel image".
 
@@ -260,18 +260,44 @@ def jamforbarhet(kort):
             "samma kort, och DER-banden och R3:s minnesgräns (ryms det på en 3080?) gäller.")
 
 
-def drivrutin():
-    """NVIDIA-drivrutinens version via pynvml, eller None."""
+def nvml_handtag(pynvml, index):
+    """NVML-handtaget för CUDA-kort nummer index, med hänsyn till CUDA_VISIBLE_DEVICES.
+
+    main sätter CUDA_DEVICE_ORDER=PCI_BUS_ID, så att CUDA och NVML räknar korten
+    lika. Ett MIG-id eller ett nummer utanför listan ger None.
+    """
+    synliga = [s.strip() for s in os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",") if s.strip()]
+    if not synliga:
+        return pynvml.nvmlDeviceGetHandleByIndex(index)
+    if index >= len(synliga):
+        return None
+    s = synliga[index]
+    if s.isdigit():
+        return pynvml.nvmlDeviceGetHandleByIndex(int(s))
+    if s.startswith("GPU-"):
+        return pynvml.nvmlDeviceGetHandleByUUID(s)
+    return None
+
+
+def nvml_info(index=0):
+    """Drivrutin och effekttak i W via pynvml, annars {}. Effekttaket styr farten."""
     try:
         import pynvml
         pynvml.nvmlInit()
         try:
             v = pynvml.nvmlSystemGetDriverVersion()
+            m = {"drivrutin": v.decode() if isinstance(v, bytes) else v}
+            try:
+                h = nvml_handtag(pynvml, index)
+                if h is not None:
+                    m["effekttak_w"] = round(pynvml.nvmlDeviceGetEnforcedPowerLimit(h) / 1000)
+            except Exception:                    # noqa: BLE001 — taket blir okänt, drivrutinen står kvar
+                pass
+            return m
         finally:
             pynvml.nvmlShutdown()
-        return v.decode() if isinstance(v, bytes) else v
-    except Exception:                            # noqa: BLE001 — utan pynvml blir den bara okänd
-        return None
+    except Exception:                            # noqa: BLE001 — utan pynvml blir det okänt
+        return {}
 
 
 def fmt(x, enhet=""):
@@ -397,7 +423,9 @@ class Pyannote:
             m["kort"] = torch.cuda.get_device_name(self.enhet)
             m["berakningsformaga"] = "%d.%d" % torch.cuda.get_device_capability(self.enhet)
             m["cudnn"] = torch.backends.cudnn.version()
-            m["drivrutin"] = drivrutin()
+            m["drivrutin"] = m["effekttak_w"] = None
+            index = self.enhet.index if self.enhet.index is not None else torch.cuda.current_device()
+            m.update(nvml_info(index))
         return m
 
     def ljudlangd(self, kalla):
@@ -667,6 +695,7 @@ def main(argv):
     if args.upprepa < 1:
         print("--upprepa måste vara minst 1", file=sys.stderr)
         return 1
+    os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")   # samma kortordning som NVML
     if not args.attrapp and not args.ljud:
         print("ange --ljud (eller --attrapp för en torrkörning)", file=sys.stderr)
         return 1
